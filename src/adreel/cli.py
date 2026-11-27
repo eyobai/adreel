@@ -12,6 +12,7 @@ adreel samples  -o examples/media     # synthetic clips + logo for trying things
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Annotated
@@ -35,6 +36,20 @@ app = typer.Typer(add_completion=False, no_args_is_help=True, help="AdReel: AI v
 def _main(verbose: Annotated[bool, typer.Option("--verbose", "-v")] = False) -> None:
     s = get_settings()
     configure_logging("DEBUG" if verbose else s.log_level, s.log_json)
+
+
+def _say(msg: str = "", *, err: bool = False, color: str | None = None, nl: bool = True) -> None:
+    """Print a line. Plain ``sys`` streams instead of ``typer.echo``: on Windows, click
+    caches a console handle that native libraries (MediaPipe) invalidate, which makes
+    every later echo raise "Windows error 6". Colours only on ANSI-capable terminals."""
+    stream = sys.stderr if err else sys.stdout
+    if color and os.name != "nt" and stream.isatty():
+        msg = typer.style(msg, fg=color)
+    try:
+        stream.write(msg + ("\n" if nl else ""))
+        stream.flush()
+    except OSError:
+        pass
 
 
 def _status(line: str) -> None:
@@ -74,7 +89,7 @@ def _load_plan(path: Path) -> EditPlan:
     try:
         return EditPlan.model_validate(_load_json(path))
     except ValidationError as exc:
-        typer.secho(f"Edit plan {path} is invalid:\n{exc}", fg="red", err=True)
+        _say(f"Edit plan {path} is invalid:\n{exc}", color="red", err=True)
         raise typer.Exit(2) from exc
 
 
@@ -82,7 +97,7 @@ def _load_brand(path: Path) -> BrandKit:
     try:
         brand = BrandKit.model_validate(_load_json(path))
     except ValidationError as exc:
-        typer.secho(f"Brand kit {path} is invalid:\n{exc}", fg="red", err=True)
+        _say(f"Brand kit {path} is invalid:\n{exc}", color="red", err=True)
         raise typer.Exit(2) from exc
     if brand.logo_path and not brand.logo_path.is_absolute():  # relative to the brand file
         brand = brand.model_copy(update={"logo_path": (path.parent / brand.logo_path).resolve()})
@@ -140,21 +155,21 @@ def render(
         with Renderer(settings=s) as renderer:
             res = renderer.render(req, progress)
     except PlanError as exc:
-        typer.secho("\nPlan cannot be rendered:", fg="red", err=True)
+        _say("\nPlan cannot be rendered:", color="red", err=True)
         for i in exc.issues:
-            typer.secho(f"  {i}", fg="red", err=True)
+            _say(f"  {i}", color="red", err=True)
         raise typer.Exit(2) from exc
     except (RenderError, FFmpegError, TemplateError) as exc:
-        typer.secho(f"\nRender failed: {exc}", fg="red", err=True)
+        _say(f"\nRender failed: {exc}", color="red", err=True)
         raise typer.Exit(1) from exc
     if sys.stderr.isatty():
-        typer.echo("", err=True)
+        _say("", err=True)
     for w in res.warnings:
-        typer.secho(f"warning: {w}", fg="yellow", err=True)
-    typer.secho(
+        _say(f"warning: {w}", color="yellow", err=True)
+    _say(
         f"✓ {res.output}  {res.width}x{res.height}  {res.duration:.2f}s  "
         f"{res.size_bytes / 1e6:.1f} MB  captions={len(res.captions)}  timings={res.timings}",
-        fg="green",
+        color="green",
     )
 
 
@@ -238,24 +253,24 @@ def make(
         with AutoEditor(settings=s, renderer=Renderer(settings=s)) as editor:
             res = editor.run(req, progress)
     except (AutoEditError, ProviderError, RenderError, FFmpegError, TemplateError) as exc:
-        typer.secho(f"\nFailed: {exc}", fg="red", err=True)
+        _say(f"\nFailed: {exc}", color="red", err=True)
         raise typer.Exit(1) from exc
     except PlanError as exc:
-        typer.secho(f"\nPlan cannot be rendered: {exc}", fg="red", err=True)
+        _say(f"\nPlan cannot be rendered: {exc}", color="red", err=True)
         raise typer.Exit(2) from exc
     if sys.stderr.isatty():
-        typer.echo("", err=True)
+        _say("", err=True)
     for w in res.warnings:
-        typer.secho(f"warning: {w}", fg="yellow", err=True)
+        _say(f"warning: {w}", color="yellow", err=True)
     r = res.render
     c = res.costs
-    typer.secho(
+    _say(
         f"✓ {r.output}  {r.width}x{r.height}  {r.duration:.2f}s  {r.size_bytes / 1e6:.1f} MB",
-        fg="green",
+        color="green",
     )
-    typer.echo(f"  planner: {res.planner_used} (attempts: {res.attempts})   timings: {res.timings}")
-    typer.echo(f"  plan: {res.plan_path}   captions: {len(res.plan.captions)}")
-    typer.echo(
+    _say(f"  planner: {res.planner_used} (attempts: {res.attempts})   timings: {res.timings}")
+    _say(f"  plan: {res.plan_path}   captions: {len(res.plan.captions)}")
+    _say(
         f"  cost: ${c.total_usd:.4f} (≈ {c.total_usd * c.prices.usd_to_etb:.2f} ETB)  "
         f"units: {c.totals()}  → {res.cost_path}"
     )
@@ -287,11 +302,11 @@ def transcribe(
     try:
         tr = build_transcriber(s, ff).transcribe(audio, language=language, duration_s=duration)
     except ProviderError as exc:
-        typer.secho(f"Failed: {exc}", fg="red", err=True)
+        _say(f"Failed: {exc}", color="red", err=True)
         raise typer.Exit(1) from exc
     for ln in build_transcript_lines({"x": tr}):
-        typer.echo(f"{ln.start:7.2f}–{ln.end:7.2f}  {ln.text}")
-    typer.echo(
+        _say(f"{ln.start:7.2f}–{ln.end:7.2f}  {ln.text}")
+    _say(
         f"({len(tr.spoken)} words, language={tr.language}, {tr.audio_seconds:.1f}s audio)", err=True
     )
     if out:
@@ -312,25 +327,25 @@ def validate(
     try:
         tpl = TemplateRegistry(s.templates_dirs).get(p.template_id)
     except TemplateError as exc:
-        typer.secho(str(exc), fg="red", err=True)
+        _say(str(exc), color="red", err=True)
         raise typer.Exit(2) from exc
-    typer.secho(f"✓ schema OK ({len(p.segments)} segments, {len(p.captions)} captions)", fg="green")
+    _say(f"✓ schema OK ({len(p.segments)} segments, {len(p.captions)} captions)", color="green")
     if not clip:
         return
     ff = FFmpeg(s.ffmpeg_bin, s.ffprobe_bin)
     durations = {cid: ff.probe(path).duration for cid, path in _parse_clips(clip).items()}
     issues = check_plan(p, tpl, durations)
     for i in issues:
-        typer.secho(f"  {i}", fg="red" if i.severity == "error" else "yellow")
+        _say(f"  {i}", color="red" if i.severity == "error" else "yellow")
     if show_repair and issues:
         fixed, fixes = repair_plan(p, tpl, durations)
         for f in fixes:
-            typer.echo(f"  fix: {f}")
-        typer.echo(fixed.model_dump_json(indent=2, exclude_defaults=True))
+            _say(f"  fix: {f}")
+        _say(fixed.model_dump_json(indent=2, exclude_defaults=True))
     if any(i.severity == "error" for i in issues):
         raise typer.Exit(2)
     if not issues:
-        typer.secho("✓ plan fits the clips and template", fg="green")
+        _say("✓ plan fits the clips and template", color="green")
 
 
 @app.command()
@@ -339,9 +354,9 @@ def schema(out: Annotated[Path | None, typer.Option("--out", "-o")] = None) -> N
     text = json.dumps(edit_plan_json_schema(), indent=2, ensure_ascii=False)
     if out:
         out.write_text(text + "\n", encoding="utf-8")
-        typer.echo(f"wrote {out}")
+        _say(f"wrote {out}")
     else:
-        typer.echo(text)
+        _say(text)
 
 
 @app.command()
@@ -349,7 +364,7 @@ def templates() -> None:
     """List available templates."""
     for t in TemplateRegistry(get_settings().templates_dirs).all():
         d = t.duration
-        typer.echo(
+        _say(
             f"{t.id:<16} {t.name.en} / {t.name.am}  ({d.min_s:.0f}–{d.max_s:.0f}s)  "
             f"slots={t.required_slots}"
         )
@@ -364,7 +379,7 @@ def samples(
 
     s = get_settings()
     for p in generate_samples(FFmpeg(s.ffmpeg_bin, s.ffprobe_bin), out, s.fonts_dir):
-        typer.echo(f"  {p}")
+        _say(f"  {p}")
 
 
 if __name__ == "__main__":  # pragma: no cover
