@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from adreel.log import get_logger
-from adreel.render.ffmpeg import FFmpeg, MediaInfo
+from adreel.render.ffmpeg import BT709_FILTER, BT709_TAGS, SD_MATRICES, FFmpeg, MediaInfo
 
 log = get_logger(__name__)
 
@@ -40,7 +40,9 @@ class NormalizeParams:
     crf: int = 17
 
     def key(self) -> str:
-        return f"{self.fps}|{self.max_long_side}|{self.target_lufs}|{self.true_peak_db}|{self.crf}"
+        return (
+            f"v2|{self.fps}|{self.max_long_side}|{self.target_lufs}|{self.true_peak_db}|{self.crf}"
+        )
 
 
 @dataclass(frozen=True)
@@ -103,7 +105,19 @@ def normalize_clip(
     vf = []
     if src_info.is_hdr:
         vf.append(_TONEMAP)
-    vf += [f"scale={tw}:{th}:flags=lanczos", "setsar=1", f"fps={params.fps}", "format=yuv420p"]
+    # SD-tagged (BT.601) sources are converted to BT.709, not just relabelled.
+    matrix = (
+        ":in_color_matrix=bt601:out_color_matrix=bt709"
+        if not src_info.is_hdr and src_info.color_space in SD_MATRICES
+        else ""
+    )
+    vf += [
+        f"scale={tw}:{th}:flags=lanczos{matrix}",
+        "setsar=1",
+        f"fps={params.fps}",
+        "format=yuv420p",
+        BT709_FILTER,
+    ]
 
     args: list[str] = ["-i", str(src)]
     if src_info.has_audio:
@@ -158,6 +172,7 @@ def normalize_clip(
         "48000",
         "-ac",
         "2",
+        *BT709_TAGS,
         "-map_metadata",
         "-1",
         "-shortest",

@@ -8,7 +8,7 @@ import pytest
 
 from adreel.config import Settings, get_settings
 from adreel.render.ffmpeg import FFmpeg
-from adreel.render.pipeline import Quality, Renderer, RenderRequest
+from adreel.render.pipeline import Quality, Renderer, RenderRequest, provide_dir
 from adreel.schemas.brand_kit import BrandKit
 from adreel.schemas.edit_plan import EditPlan
 from tests.conftest import requires_ffmpeg
@@ -114,6 +114,11 @@ def test_render_preview_end_to_end(
     info = FFmpeg().probe(res.output)
     assert info.has_audio and info.fps == pytest.approx(30)
     assert stages[-1] == "done" and "compose" in stages
+    # Uniform colour metadata on every concatenated intermediate: ffmpeg 7+ otherwise
+    # rebuilds the filter graph mid-stream and stalls on the looped logo input.
+    segs = sorted((tmp_path / "work" / "seg").glob("*.mkv"))
+    assert segs and {FFmpeg().probe(f).color_space for f in segs} == {"bt709"}
+    assert info.color_space == "bt709"
     assert res.captions and res.warnings == []
 
     # Fix-captions flow: only the compose step re-runs.
@@ -139,7 +144,7 @@ def test_ethiopic_glyphs_render_with_bundled_fonts(tmp_path: Path) -> None:
     doc.add_style(AssStyle("A", 48))
     doc.add(AssEvent(0, 1, "A", "{\\an5\\pos(270,100)}" + font_runs("ዋጋ 1,200 ብር! ይዘዙ፣ @shop")))
     (tmp_path / "t.ass").write_text(doc.render(), encoding="utf-8")
-    (tmp_path / "fonts").symlink_to(get_settings().fonts_dir.resolve())
+    provide_dir(get_settings().fonts_dir.resolve(), tmp_path / "fonts")
     stderr = FFmpeg().run(
         [
             "-loglevel",
@@ -160,3 +165,19 @@ def test_ethiopic_glyphs_render_with_bundled_fonts(tmp_path: Path) -> None:
     assert "failed to find any fallback" not in stderr
     assert "Glyph 0x" not in stderr
     assert (tmp_path / "frame.png").stat().st_size > 2000  # something was drawn
+
+
+def test_safe_progress_never_raises() -> None:
+    from adreel.render.pipeline import safe_progress
+
+    calls: list[str] = []
+
+    def bad(stage: str, frac: float) -> None:
+        calls.append(stage)
+        raise OSError("Windows error 6")
+
+    report = safe_progress(bad)
+    report("a", 0.1)
+    report("b", 0.2)  # disabled after the first failure
+    assert calls == ["a"]
+    safe_progress(None)("x", 1.0)

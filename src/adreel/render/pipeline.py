@@ -29,7 +29,7 @@ from adreel.config import Settings, get_settings
 from adreel.log import get_logger
 from adreel.plan_checks import PlanError, check_plan, repair_plan
 from adreel.render.captions import CaptionEvent
-from adreel.render.ffmpeg import FFmpeg
+from adreel.render.ffmpeg import BT709_FILTER, BT709_TAGS, FFmpeg
 from adreel.render.normalize import NormalizedClip, NormalizeParams, normalize_clip
 from adreel.render.overlays import LogoPlacement, build_overlays
 from adreel.render.reframe import (
@@ -137,7 +137,7 @@ class Renderer:
     # ------------------------------------------------------------------ public
 
     def render(self, req: RenderRequest, progress: ProgressFn | None = None) -> RenderResult:
-        report = progress or (lambda stage, frac: None)
+        report = safe_progress(progress)
         timings: dict[str, float] = {}
         warnings: list[str] = []
         tpl = self.templates.get(req.plan.template_id)
@@ -226,8 +226,8 @@ class Renderer:
         )
         warnings += ov.warnings
         (job_dir / "overlays.ass").write_text(ov.doc.render(), encoding="utf-8")
-        os.symlink(self.s.fonts_dir.resolve(), job_dir / "fonts", target_is_directory=True)
-        (job_dir / "concat.txt").write_text("".join(f"file '{f}'\n" for f in seg_files))
+        provide_dir(self.s.fonts_dir.resolve(), job_dir / "fonts")
+        (job_dir / "concat.txt").write_text("".join(concat_line(f) for f in seg_files))
 
         vo_path = req.voiceover_audio or (
             Path(plan.voiceover.audio_path)
@@ -341,7 +341,7 @@ class Renderer:
         seg = p.segment
         tracking = self.s.face_tracking and seg.reframe.mode in (ReframeMode.AUTO, ReframeMode.FACE)
         key = _key(
-            "seg-v1",
+            "seg-v2",
             clip.path.name,
             seg.start,
             p.frames,
@@ -373,7 +373,7 @@ class Renderer:
         vol = "" if seg.keep_audio else ",volume=0"
         fc = (
             decision.video_filter(out_w, out_h, "0:v", "vr")
-            + ";[vr]tpad=stop_mode=clone:stop_duration=2[v];"
+            + f";[vr]tpad=stop_mode=clone:stop_duration=2,{BT709_FILTER}[v];"
             + f"[0:a]asetpts=PTS-STARTPTS{vol},apad,atrim=0:{dur:.6f}[a]"
         )
         tmp = dst.with_suffix(".part.mkv")
@@ -401,6 +401,7 @@ class Renderer:
                 str(preset.seg_crf),
                 "-pix_fmt",
                 "yuv420p",
+                *BT709_TAGS,
                 "-c:a",
                 "pcm_s16le",
                 "-ar",
@@ -426,7 +427,7 @@ class Renderer:
 
         bg = Palette(brand)(tpl.end_card.background)
         fps = tpl.canvas.fps
-        key = _key("end-v1", bg, out_w, out_h, fps, tl.end_card_frames, preset.seg_crf)
+        key = _key("end-v2", bg, out_w, out_h, fps, tl.end_card_frames, preset.seg_crf)
         dst = self.s.work_dir.resolve() / "seg" / f"end_{key}.mkv"
         if dst.exists():
             return dst
@@ -444,7 +445,7 @@ class Renderer:
                 "-i",
                 "anullsrc=r=48000:cl=stereo",
                 "-vf",
-                "vignette=angle=PI/5,format=yuv420p,setsar=1",
+                f"vignette=angle=PI/5,format=yuv420p,setsar=1,{BT709_FILTER}",
                 "-frames:v",
                 str(tl.end_card_frames),
                 "-af",
@@ -455,6 +456,7 @@ class Renderer:
                 preset.seg_preset,
                 "-crf",
                 str(preset.seg_crf),
+                *BT709_TAGS,
                 "-c:a",
                 "pcm_s16le",
                 "-ar",
@@ -484,7 +486,8 @@ class Renderer:
         total = tl.total_duration
         fps = tpl.canvas.fps
         k = out_w / tpl.canvas.width  # canvas px -> output px
-        args = ["-f", "concat", "-safe", "0", "-i", "concat.txt"]
+        # -reinit_filter 0: never rebuild the graph mid-stream (see BT709_FILTER).
+        args = ["-reinit_filter", "0", "-f", "concat", "-safe", "0", "-i", "concat.txt"]
         chains: list[str] = []
         cur = "0:v"
         next_in = 1
@@ -561,6 +564,7 @@ class Renderer:
             "high",
             "-pix_fmt",
             "yuv420p",
+            *BT709_TAGS,
         ]
         if preset.maxrate:
             args += [
@@ -583,3 +587,45 @@ class Renderer:
             str(out.resolve()),
         ]
         return args
+
+
+def provide_dir(src: Path, dst: Path) -> None:
+    """Make ``src`` available at ``dst``: a symlink where allowed, else a copy.
+
+    Windows only allows symlinks with admin rights or Developer Mode; the fonts are small
+    (~1.7 MB), so copying is a fine fallback.
+    """
+    try:
+        os.symlink(src, dst, target_is_directory=True)
+    except OSError:
+        shutil.copytree(src, dst)
+
+
+def concat_line(path: Path) -> str:
+    """One entry for ffmpeg's concat demuxer. Forward slashes work on every OS and avoid
+    backslash escaping; single quotes in the path are escaped the way the demuxer expects."""
+    quoted = path.resolve().as_posix().replace("'", "'\\''")
+    return f"file '{quoted}'\n"
+
+
+def safe_progress(progress: ProgressFn | None) -> ProgressFn:
+    """Wrap a progress callback so a failure in it never aborts the work.
+
+    Progress is cosmetic (a terminal line, a Telegram status message that may fail to
+    edit). On the first error the callback is disabled and the error logged once.
+    """
+    if progress is None:
+        return lambda stage, frac: None
+    broken = False
+
+    def report(stage: str, frac: float) -> None:
+        nonlocal broken
+        if broken:
+            return
+        try:
+            progress(stage, frac)
+        except Exception as exc:
+            broken = True
+            log.warning("progress.disabled", error=f"{type(exc).__name__}: {exc}")
+
+    return report

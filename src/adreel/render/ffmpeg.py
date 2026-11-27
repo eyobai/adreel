@@ -22,7 +22,18 @@ from adreel.log import get_logger
 
 log = get_logger(__name__)
 
-ProgressCb = Callable[[float], None]  # seconds of output written so far
+ProgressCb = Callable[[float], None]
+
+# Every intermediate we write carries identical colour metadata. ffmpeg 7+ rebuilds the
+# whole filter graph when a concatenated input changes stream parameters (colour tags
+# included); the rebuilt graph then waits forever on looped/side inputs that already
+# ended. Uniform tags (plus -reinit_filter 0 on the compose input) prevent that.
+BT709_FILTER = "setparams=colorspace=bt709:color_primaries=bt709:color_trc=bt709:range=tv"
+BT709_TAGS = [
+    "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709",
+    "-color_range", "tv", "-chroma_sample_location", "left",
+]  # fmt: skip
+SD_MATRICES = {"bt470bg", "smpte170m", "bt601"}  # seconds of output written so far
 
 
 class FFmpegError(RuntimeError):
@@ -45,6 +56,7 @@ class MediaInfo:
     rotation: int
     is_hdr: bool
     pix_fmt: str | None
+    color_space: str | None = None  # matrix, e.g. "bt709", "bt470bg", "smpte170m"
 
     @property
     def aspect(self) -> float:
@@ -156,6 +168,7 @@ class FFmpeg:
             rotation=rotation,
             is_hdr=video.get("color_transfer") in {"arib-std-b67", "smpte2084"},
             pix_fmt=video.get("pix_fmt"),
+            color_space=video.get("color_space"),
         )
 
 

@@ -14,6 +14,10 @@ dependencies = [
     "PyYAML>=6.0",
     "typer>=0.12",
     "structlog>=24.1",
+    # Phase 2: AI layer
+    "httpx>=0.27",
+    "google-genai>=1.30",  # response_json_schema support
+    "scenedetect>=0.6.4",  # pulls opencv-python (needs libGL in slim images)
 ]
 
 [project.optional-dependencies]
@@ -51,5 +55,5 @@ strict = true
 plugins = ["pydantic.mypy"]
 mypy_path = "src"
 [[tool.mypy.overrides]]
-module = ["mediapipe.*"]
+module = ["mediapipe.*", "scenedetect.*"]
 ignore_missing_imports = true
