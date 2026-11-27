@@ -8,7 +8,7 @@ import pytest
 
 from adreel.config import Settings, get_settings
 from adreel.render.ffmpeg import FFmpeg
-from adreel.render.pipeline import Quality, Renderer, RenderRequest
+from adreel.render.pipeline import Quality, Renderer, RenderRequest, provide_dir
 from adreel.schemas.brand_kit import BrandKit
 from adreel.schemas.edit_plan import EditPlan
 from tests.conftest import requires_ffmpeg
@@ -139,7 +139,7 @@ def test_ethiopic_glyphs_render_with_bundled_fonts(tmp_path: Path) -> None:
     doc.add_style(AssStyle("A", 48))
     doc.add(AssEvent(0, 1, "A", "{\\an5\\pos(270,100)}" + font_runs("ዋጋ 1,200 ብር! ይዘዙ፣ @shop")))
     (tmp_path / "t.ass").write_text(doc.render(), encoding="utf-8")
-    (tmp_path / "fonts").symlink_to(get_settings().fonts_dir.resolve())
+    provide_dir(get_settings().fonts_dir.resolve(), tmp_path / "fonts")
     stderr = FFmpeg().run(
         [
             "-loglevel",

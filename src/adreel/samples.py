@@ -13,7 +13,11 @@ from adreel.render.ffmpeg import FFmpeg
 
 def generate_samples(ff: FFmpeg, out_dir: Path, fonts_dir: Path) -> list[Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
-    font = (fonts_dir / "NotoSans-Bold.ttf").resolve()
+    # ffmpeg runs inside the fonts dir and names the font file bare: a Windows path
+    # ("C:\\...") in a filter argument would need fragile colon/backslash escaping.
+    font = "NotoSans-Bold.ttf"
+    cwd = fonts_dir.resolve()
+    out_dir = out_dir.resolve()
     paths = {
         "c1": out_dir / "c1_portrait_60fps.mp4",
         "c2": out_dir / "c2_landscape_noaudio.mp4",
@@ -38,7 +42,8 @@ def generate_samples(ff: FFmpeg, out_dir: Path, fonts_dir: Path) -> list[Path]:
     speech = "aevalsrc='0.4*sin(2*PI*220*t)*lt(mod(t\\,2)\\,1.3)':s=48000:d={d}"
 
     ff.run(
-        [
+        cwd=cwd,
+        args=[
             "-f",
             "lavfi",
             "-i",
@@ -60,10 +65,11 @@ def generate_samples(ff: FFmpeg, out_dir: Path, fonts_dir: Path) -> list[Path]:
             "aac",
             "-shortest",
             str(paths["c1"]),
-        ]
+        ],
     )
     ff.run(
-        [
+        cwd=cwd,
+        args=[
             "-f",
             "lavfi",
             "-i",
@@ -78,10 +84,11 @@ def generate_samples(ff: FFmpeg, out_dir: Path, fonts_dir: Path) -> list[Path]:
             "-pix_fmt",
             "yuv420p",
             str(paths["c2"]),
-        ]
+        ],
     )
     ff.run(
-        [
+        cwd=cwd,
+        args=[
             "-f",
             "lavfi",
             "-i",
@@ -102,10 +109,11 @@ def generate_samples(ff: FFmpeg, out_dir: Path, fonts_dir: Path) -> list[Path]:
             "aac",
             "-shortest",
             str(paths["c3"]),
-        ]
+        ],
     )
     ff.run(
-        [
+        cwd=cwd,
+        args=[
             "-f",
             "lavfi",
             "-i",
@@ -118,11 +126,12 @@ def generate_samples(ff: FFmpeg, out_dir: Path, fonts_dir: Path) -> list[Path]:
             "-frames:v",
             "1",
             str(paths["logo"]),
-        ]
+        ],
     )
     # Stand-in "voiceover" (higher-pitched bursts) to hear the ducking of the original audio.
     ff.run(
-        [
+        cwd=cwd,
+        args=[
             "-f",
             "lavfi",
             "-i",
@@ -130,6 +139,6 @@ def generate_samples(ff: FFmpeg, out_dir: Path, fonts_dir: Path) -> list[Path]:
             "-ac",
             "2",
             str(paths["vo"]),
-        ]
+        ],
     )
     return list(paths.values())

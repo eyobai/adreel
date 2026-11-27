@@ -226,8 +226,8 @@ class Renderer:
         )
         warnings += ov.warnings
         (job_dir / "overlays.ass").write_text(ov.doc.render(), encoding="utf-8")
-        os.symlink(self.s.fonts_dir.resolve(), job_dir / "fonts", target_is_directory=True)
-        (job_dir / "concat.txt").write_text("".join(f"file '{f}'\n" for f in seg_files))
+        provide_dir(self.s.fonts_dir.resolve(), job_dir / "fonts")
+        (job_dir / "concat.txt").write_text("".join(concat_line(f) for f in seg_files))
 
         vo_path = req.voiceover_audio or (
             Path(plan.voiceover.audio_path)
@@ -583,3 +583,22 @@ class Renderer:
             str(out.resolve()),
         ]
         return args
+
+
+def provide_dir(src: Path, dst: Path) -> None:
+    """Make ``src`` available at ``dst``: a symlink where allowed, else a copy.
+
+    Windows only allows symlinks with admin rights or Developer Mode; the fonts are small
+    (~1.7 MB), so copying is a fine fallback.
+    """
+    try:
+        os.symlink(src, dst, target_is_directory=True)
+    except OSError:
+        shutil.copytree(src, dst)
+
+
+def concat_line(path: Path) -> str:
+    """One entry for ffmpeg's concat demuxer. Forward slashes work on every OS and avoid
+    backslash escaping; single quotes in the path are escaped the way the demuxer expects."""
+    quoted = path.resolve().as_posix().replace("'", "'\\''")
+    return f"file '{quoted}'\n"
