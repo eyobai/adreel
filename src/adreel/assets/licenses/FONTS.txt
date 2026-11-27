@@ -1,0 +1,2 @@
+Noto Sans and Noto Sans Ethiopic, Copyright 2012-2020 Google Inc. / The Noto Project Authors.
+Source: Debian package fonts-noto-core 20201225-2. Licensed under the SIL Open Font License 1.1 (OFL.txt).

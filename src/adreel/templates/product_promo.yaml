@@ -1,0 +1,58 @@
+# Product promo: hook -> product shots -> price card -> call to action. 20–30 s.
+id: product_promo
+version: 1
+name: {am: "የምርት ማስታወቂያ", en: "Product promo"}
+description: Fast-paced product showcase with a price card and a call-to-action end card.
+
+canvas: {width: 1080, height: 1920, fps: 30}
+duration: {min_s: 20, max_s: 30}   # includes the end card
+
+structure:
+  - {role: hook, required: true, min_s: 1.5, max_s: 4}
+  - {role: product, required: true, min_s: 1.2, max_s: 6, repeat: true}
+  - {role: cta, required: false, min_s: 1.5, max_s: 5}
+
+required_slots: [product_name, price]
+
+captions:
+  font_size: 86
+  mode: outline
+  y: 0.80
+  max_units_per_line: 15
+  max_lines: 2
+  highlight_active_word: true
+  highlight_color: primary
+
+text:
+  top_y: 0.15
+  center_y: 0.45
+  bottom_y: 0.64
+  max_units_per_line: 11
+  styles:
+    hook:     {font_size: 128, color: white, outline_color: black, outline_px: 6, shadow_px: 3, pop_in: true}
+    emphasis: {font_size: 96, color: primary, outline_color: white, outline_px: 5}
+    label:    {font_size: 60, color: on_primary, box: true, box_color: primary, outline_px: 0}
+
+logo: {enabled: true, corner: top_right, width_frac: 0.2, margin_px: 48, opacity: 0.95}
+
+price_card:
+  enabled: true
+  y: 0.6
+  width_frac: 0.8
+  radius_px: 40
+  background: primary
+  text_color: on_primary
+
+end_card:
+  enabled: true
+  duration_s: 3.0
+  background: primary
+  text_color: on_primary
+  default_cta: {am: "አሁኑኑ ይዘዙ!", en: "Order now!"}
+
+audio: {target_lufs: -14, true_peak_db: -1.5, duck_ratio: 8}
+
+ai_guidance: >-
+  Open with the most eye-catching product shot as the hook (1.5-4 s). Use short product
+  shots (1.2-6 s each) that show the product from different angles. Put the price card on
+  a clear, steady product shot. Total length including the 3 s end card: 20-30 s.

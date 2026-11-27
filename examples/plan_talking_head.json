@@ -1,0 +1,42 @@
+{
+  "schema_version": "1.0",
+  "template_id": "talking_head",
+  "language": "am",
+  "title": "Owner introduction",
+  "segments": [
+    {"id": "s1", "clip_id": "c3", "start": 0.0, "end": 1.4, "role": "speaker"},
+    {"id": "s2", "clip_id": "c3", "start": 1.95, "end": 3.4, "role": "speaker",
+     "note": "0.55 s silence removed"},
+    {"id": "s3", "clip_id": "c3", "start": 3.95, "end": 5.4, "role": "speaker"},
+    {"id": "b1", "clip_id": "c2", "start": 1.0, "end": 3.0, "role": "broll", "keep_audio": false},
+    {"id": "s4", "clip_id": "c3", "start": 5.95, "end": 7.4, "role": "speaker"},
+    {"id": "s5", "clip_id": "c3", "start": 7.95, "end": 9.4, "role": "speaker"}
+  ],
+  "captions": [
+    {"id": 1, "text": "ሰላም! እኔ አበበ እባላለሁ", "timebase": "source", "clip_id": "c3",
+     "start": 0.1, "end": 3.3,
+     "words": [
+       {"text": "ሰላም!", "start": 0.1, "end": 0.6},
+       {"text": "እኔ", "start": 0.7, "end": 1.2},
+       {"text": "አበበ", "start": 2.05, "end": 2.6},
+       {"text": "እባላለሁ", "start": 2.65, "end": 3.3}
+     ]},
+    {"id": 2, "text": "የቡና ቤታችን እ... በፒያሳ ይገኛል", "timebase": "source", "clip_id": "c3",
+     "start": 4.0, "end": 7.3,
+     "words": [
+       {"text": "የቡና", "start": 4.0, "end": 4.5},
+       {"text": "ቤታችን", "start": 4.55, "end": 5.3},
+       {"text": "እ...", "start": 5.45, "end": 5.9},
+       {"text": "በፒያሳ", "start": 6.0, "end": 6.6},
+       {"text": "ይገኛል", "start": 6.65, "end": 7.3}
+     ]},
+    {"id": 3, "text": "እንኳን ደህና መጡ!", "timebase": "source", "clip_id": "c3",
+     "start": 8.0, "end": 9.3}
+  ],
+  "on_screen_text": [
+    {"text": "ፒያሳ, አዲስ አበባ", "segment_id": "b1", "style": "label", "position": "bottom"}
+  ],
+  "slots": {"hook_text": "ከባለቤቱ ጋር ይተዋወቁ", "cta_text": "ይጎብኙን!"},
+  "price_card": {"enabled": false},
+  "voiceover": null
+}

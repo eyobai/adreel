@@ -1,0 +1,581 @@
+{
+  "$defs": {
+    "CaptionLine": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "Stable 1-based number shown to the user for fixes",
+          "maximum": 999,
+          "minimum": 1,
+          "title": "Id",
+          "type": "integer"
+        },
+        "text": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "timebase": {
+          "$ref": "#/$defs/Timebase",
+          "default": "source"
+        },
+        "clip_id": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9_-]{1,32}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Required when timebase=source",
+          "title": "Clip Id"
+        },
+        "start": {
+          "maximum": 600.0,
+          "minimum": 0,
+          "title": "Start",
+          "type": "number"
+        },
+        "end": {
+          "maximum": 600.0,
+          "minimum": 0,
+          "title": "End",
+          "type": "number"
+        },
+        "words": {
+          "description": "Optional word timings (same timebase). Enables cut-aware text and active-word highlighting.",
+          "items": {
+            "$ref": "#/$defs/Word"
+          },
+          "maxItems": 60,
+          "title": "Words",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "text",
+        "start",
+        "end"
+      ],
+      "title": "CaptionLine",
+      "type": "object"
+    },
+    "OnScreenText": {
+      "additionalProperties": false,
+      "properties": {
+        "text": {
+          "maxLength": 60,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "segment_id": {
+          "pattern": "^[A-Za-z0-9_-]{1,32}$",
+          "title": "Segment Id",
+          "type": "string"
+        },
+        "start_offset": {
+          "default": 0.0,
+          "description": "Seconds after segment start",
+          "maximum": 60,
+          "minimum": 0,
+          "title": "Start Offset",
+          "type": "number"
+        },
+        "duration": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "maximum": 30,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Seconds; null = until the end of the segment",
+          "title": "Duration"
+        },
+        "style": {
+          "$ref": "#/$defs/TextStyle",
+          "default": "emphasis"
+        },
+        "position": {
+          "$ref": "#/$defs/TextPosition",
+          "default": "top"
+        }
+      },
+      "required": [
+        "text",
+        "segment_id"
+      ],
+      "title": "OnScreenText",
+      "type": "object"
+    },
+    "PriceCard": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "segment_id": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9_-]{1,32}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "null = last 'product' segment",
+          "title": "Segment Id"
+        },
+        "start_offset": {
+          "default": 0.3,
+          "maximum": 30,
+          "minimum": 0,
+          "title": "Start Offset",
+          "type": "number"
+        },
+        "duration": {
+          "default": 3.0,
+          "maximum": 8.0,
+          "minimum": 1.0,
+          "title": "Duration",
+          "type": "number"
+        }
+      },
+      "title": "PriceCard",
+      "type": "object"
+    },
+    "Reframe": {
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "$ref": "#/$defs/ReframeMode",
+          "default": "auto"
+        },
+        "focus_x": {
+          "default": 0.5,
+          "description": "Horizontal point of interest, 0=left",
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Focus X",
+          "type": "number"
+        },
+        "focus_y": {
+          "default": 0.5,
+          "description": "Vertical point of interest, 0=top",
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Focus Y",
+          "type": "number"
+        },
+        "zoom": {
+          "default": 1.0,
+          "description": "Punch-in factor on top of the crop",
+          "maximum": 2.0,
+          "minimum": 1.0,
+          "title": "Zoom",
+          "type": "number"
+        }
+      },
+      "title": "Reframe",
+      "type": "object"
+    },
+    "ReframeMode": {
+      "enum": [
+        "auto",
+        "face",
+        "center",
+        "fit"
+      ],
+      "title": "ReframeMode",
+      "type": "string"
+    },
+    "Segment": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[A-Za-z0-9_-]{1,32}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "clip_id": {
+          "pattern": "^[A-Za-z0-9_-]{1,32}$",
+          "title": "Clip Id",
+          "type": "string"
+        },
+        "start": {
+          "description": "In-point in the source clip, seconds",
+          "maximum": 600.0,
+          "minimum": 0,
+          "title": "Start",
+          "type": "number"
+        },
+        "end": {
+          "description": "Out-point in the source clip, seconds",
+          "maximum": 600.0,
+          "minimum": 0,
+          "title": "End",
+          "type": "number"
+        },
+        "role": {
+          "$ref": "#/$defs/SegmentRole"
+        },
+        "reframe": {
+          "$ref": "#/$defs/Reframe",
+          "default": {
+            "mode": "auto",
+            "focus_x": 0.5,
+            "focus_y": 0.5,
+            "zoom": 1.0
+          }
+        },
+        "keep_audio": {
+          "default": true,
+          "description": "False mutes the original sound of this segment",
+          "title": "Keep Audio",
+          "type": "boolean"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Why this cut (ignored by render)",
+          "title": "Note"
+        }
+      },
+      "required": [
+        "id",
+        "clip_id",
+        "start",
+        "end",
+        "role"
+      ],
+      "title": "Segment",
+      "type": "object"
+    },
+    "SegmentRole": {
+      "enum": [
+        "hook",
+        "product",
+        "speaker",
+        "broll",
+        "cta"
+      ],
+      "title": "SegmentRole",
+      "type": "string"
+    },
+    "TemplateSlots": {
+      "additionalProperties": false,
+      "properties": {
+        "hook_text": {
+          "anyOf": [
+            {
+              "maxLength": 60,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Hook Text"
+        },
+        "product_name": {
+          "anyOf": [
+            {
+              "maxLength": 40,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Product Name"
+        },
+        "price": {
+          "anyOf": [
+            {
+              "maximum": 10000000,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "In ETB",
+          "title": "Price"
+        },
+        "old_price": {
+          "anyOf": [
+            {
+              "maximum": 10000000,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Shown struck through",
+          "title": "Old Price"
+        },
+        "price_note": {
+          "anyOf": [
+            {
+              "maxLength": 40,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "e.g. 'ለ3 ቀን ብቻ'",
+          "title": "Price Note"
+        },
+        "cta_text": {
+          "anyOf": [
+            {
+              "maxLength": 60,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cta Text"
+        }
+      },
+      "title": "TemplateSlots",
+      "type": "object"
+    },
+    "TextPosition": {
+      "enum": [
+        "top",
+        "center",
+        "bottom"
+      ],
+      "title": "TextPosition",
+      "type": "string"
+    },
+    "TextStyle": {
+      "enum": [
+        "hook",
+        "label",
+        "emphasis"
+      ],
+      "title": "TextStyle",
+      "type": "string"
+    },
+    "Timebase": {
+      "enum": [
+        "source",
+        "output"
+      ],
+      "title": "Timebase",
+      "type": "string"
+    },
+    "VoiceTier": {
+      "enum": [
+        "standard",
+        "premium"
+      ],
+      "title": "VoiceTier",
+      "type": "string"
+    },
+    "Voiceover": {
+      "additionalProperties": false,
+      "properties": {
+        "script": {
+          "maxLength": 1500,
+          "minLength": 1,
+          "title": "Script",
+          "type": "string"
+        },
+        "voice": {
+          "$ref": "#/$defs/VoiceTier",
+          "default": "standard"
+        },
+        "start": {
+          "default": 0.0,
+          "description": "Output time at which the VO starts",
+          "maximum": 60,
+          "minimum": 0,
+          "title": "Start",
+          "type": "number"
+        },
+        "audio_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Filled in by the pipeline after TTS (or by hand for testing)",
+          "title": "Audio Path"
+        }
+      },
+      "required": [
+        "script"
+      ],
+      "title": "Voiceover",
+      "type": "object"
+    },
+    "Word": {
+      "additionalProperties": false,
+      "properties": {
+        "text": {
+          "maxLength": 40,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "start": {
+          "maximum": 600.0,
+          "minimum": 0,
+          "title": "Start",
+          "type": "number"
+        },
+        "end": {
+          "maximum": 600.0,
+          "minimum": 0,
+          "title": "End",
+          "type": "number"
+        }
+      },
+      "required": [
+        "text",
+        "start",
+        "end"
+      ],
+      "title": "Word",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "template_id": {
+      "pattern": "^[A-Za-z0-9_-]{1,32}$",
+      "title": "Template Id",
+      "type": "string"
+    },
+    "language": {
+      "default": "am",
+      "enum": [
+        "am",
+        "en"
+      ],
+      "title": "Language",
+      "type": "string"
+    },
+    "title": {
+      "anyOf": [
+        {
+          "maxLength": 80,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Title"
+    },
+    "segments": {
+      "items": {
+        "$ref": "#/$defs/Segment"
+      },
+      "maxItems": 40,
+      "minItems": 1,
+      "title": "Segments",
+      "type": "array"
+    },
+    "captions": {
+      "items": {
+        "$ref": "#/$defs/CaptionLine"
+      },
+      "maxItems": 200,
+      "title": "Captions",
+      "type": "array"
+    },
+    "on_screen_text": {
+      "items": {
+        "$ref": "#/$defs/OnScreenText"
+      },
+      "maxItems": 20,
+      "title": "On Screen Text",
+      "type": "array"
+    },
+    "slots": {
+      "$ref": "#/$defs/TemplateSlots",
+      "default": {
+        "hook_text": null,
+        "product_name": null,
+        "price": null,
+        "old_price": null,
+        "price_note": null,
+        "cta_text": null
+      }
+    },
+    "price_card": {
+      "$ref": "#/$defs/PriceCard",
+      "default": {
+        "enabled": false,
+        "segment_id": null,
+        "start_offset": 0.3,
+        "duration": 3.0
+      }
+    },
+    "voiceover": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Voiceover"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "template_id",
+    "segments"
+  ],
+  "title": "EditPlan",
+  "type": "object"
+}

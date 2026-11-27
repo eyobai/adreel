@@ -1,0 +1,54 @@
+# Talking head: one speaker, silences and fillers removed, captions, logo, end card.
+id: talking_head
+version: 1
+name: {am: "ንግግር ቪዲዮ", en: "Talking head"}
+description: Speaker-led video with tight cuts, word-highlighted captions and an end card.
+
+canvas: {width: 1080, height: 1920, fps: 30}
+duration: {min_s: 8, max_s: 60}
+
+structure:
+  - {role: speaker, required: true, min_s: 0.5, max_s: 20, repeat: true}
+  - {role: broll, required: false, min_s: 1, max_s: 6, repeat: true}
+
+required_slots: []
+
+captions:
+  font_size: 92
+  mode: outline
+  y: 0.74
+  max_units_per_line: 14
+  max_lines: 2
+  highlight_active_word: true
+  highlight_color: primary
+
+text:
+  top_y: 0.15
+  center_y: 0.45
+  bottom_y: 0.6
+  max_units_per_line: 11
+  styles:
+    hook:     {font_size: 124, color: white, outline_color: black, outline_px: 6, shadow_px: 3, pop_in: true}
+    emphasis: {font_size: 92, color: primary, outline_color: white, outline_px: 5}
+    label:    {font_size: 58, color: on_primary, box: true, box_color: primary, outline_px: 0}
+
+logo: {enabled: true, corner: top_left, width_frac: 0.18, margin_px: 48, opacity: 0.9}
+
+price_card: {enabled: true}
+
+end_card:
+  enabled: true
+  duration_s: 2.5
+  background: primary
+  text_color: on_primary
+  default_cta: {am: "ይከተሉን!", en: "Follow us!"}
+
+reframe:
+  alternate_zoom: 1.12
+
+audio: {target_lufs: -14, true_peak_db: -1.5, duck_ratio: 6}
+
+ai_guidance: >-
+  Keep the speaker's strongest sentences in their original order. Remove silences over
+  0.35 s, filler words (እ..., ኧ..., "ማለት" used as filler), false starts and repeated takes.
+  Every speaker segment should start and end on a word boundary.

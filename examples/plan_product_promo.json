@@ -1,0 +1,58 @@
+{
+  "schema_version": "1.0",
+  "template_id": "product_promo",
+  "language": "am",
+  "title": "Ethiopian coffee promo",
+  "segments": [
+    {"id": "s1", "clip_id": "c1", "start": 0.5, "end": 3.5, "role": "hook",
+     "note": "Most striking shot first"},
+    {"id": "s2", "clip_id": "c2", "start": 0.0, "end": 4.0, "role": "product",
+     "reframe": {"mode": "auto"}},
+    {"id": "s3", "clip_id": "c3", "start": 1.0, "end": 5.5, "role": "product",
+     "reframe": {"mode": "center", "focus_x": 0.4}},
+    {"id": "s4", "clip_id": "c1", "start": 4.0, "end": 8.5, "role": "product",
+     "note": "Steady shot for the price card"},
+    {"id": "s5", "clip_id": "c3", "start": 7.0, "end": 10.5, "role": "cta",
+     "reframe": {"mode": "fit"}}
+  ],
+  "captions": [
+    {"id": 1, "text": "ዛሬ አዲስ የኢትዮጵያ ቡና ደርሷል!", "timebase": "source", "clip_id": "c1",
+     "start": 0.6, "end": 3.3,
+     "words": [
+       {"text": "ዛሬ", "start": 0.6, "end": 0.95},
+       {"text": "አዲስ", "start": 1.0, "end": 1.3},
+       {"text": "የኢትዮጵያ", "start": 2.0, "end": 2.5},
+       {"text": "ቡና", "start": 2.55, "end": 2.85},
+       {"text": "ደርሷል!", "start": 2.9, "end": 3.3}
+     ]},
+    {"id": 2, "text": "በየቀኑ ትኩስ ተቆልቶ የሚፈጭ", "timebase": "source", "clip_id": "c3",
+     "start": 1.2, "end": 3.3},
+    {"id": 3, "text": "ጣዕሙን ይሞክሩት", "timebase": "source", "clip_id": "c3",
+     "start": 4.0, "end": 5.3},
+    {"id": 4, "text": "ለ3 ቀን ብቻ ልዩ ቅናሽ", "timebase": "source", "clip_id": "c1",
+     "start": 4.0, "end": 7.3,
+     "words": [
+       {"text": "ለ3", "start": 4.0, "end": 4.4},
+       {"text": "ቀን", "start": 4.45, "end": 4.8},
+       {"text": "ብቻ", "start": 4.85, "end": 5.25},
+       {"text": "ልዩ", "start": 6.0, "end": 6.4},
+       {"text": "ቅናሽ", "start": 6.45, "end": 7.2}
+     ]},
+    {"id": 5, "text": "አሁኑኑ ይዘዙ፣ በቴሌግራም ያግኙን", "timebase": "source", "clip_id": "c3",
+     "start": 8.0, "end": 10.3}
+  ],
+  "on_screen_text": [
+    {"text": "ትኩስ ቡና", "segment_id": "s2", "start_offset": 0.3, "duration": 2.5,
+     "style": "label", "position": "top"}
+  ],
+  "slots": {
+    "hook_text": "አዲስ የቡና ምርት!",
+    "product_name": "ይርጋጨፌ ቡና 1 ኪሎ",
+    "price": 1200,
+    "old_price": 1500,
+    "price_note": "ለ3 ቀን ብቻ",
+    "cta_text": "አሁኑኑ ይዘዙ!"
+  },
+  "price_card": {"enabled": true, "segment_id": "s4", "start_offset": 0.4, "duration": 3.2},
+  "voiceover": null
+}
