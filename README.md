@@ -6,8 +6,8 @@ Ethiopia and delivered as a Telegram bot.
 
 | Phase | Scope | Status |
 |---|---|---|
-| 1 | Render engine + CLI (clips + edit plan + brand kit → video) | **done** |
-| 2 | AI layer: Scribe transcription, Gemini edit plan, Azure/ElevenLabs TTS, cost log | next |
+| 1 | Render engine + CLI (clips + edit plan + brand kit → video) | done |
+| 2 | AI layer: Scribe transcription, Gemini edit plan, Azure/ElevenLabs TTS, cost log | **done** |
 | 3 | Telegram bot (aiogram 3), Redis/RQ worker, Postgres, preview/approve/fix-captions | |
 | 4 | Credits ledger, Chapa payments, admin `/stats` | |
 
@@ -29,6 +29,19 @@ adreel render -p plan_talking_head.json -b brand_kit.json \
   -o talk_preview.mp4 -q preview --watermark --voiceover media/vo_test.wav
 ```
 
+Automatic editing (Phase 2). `--fake` runs the whole pipeline without API keys, using fake
+transcription and TTS plus the heuristic planner; drop it once your keys are in `.env`:
+
+```bash
+cd examples
+adreel make -t product_promo -b brand_kit.json \
+  -c c1=media/c1_portrait_60fps.mp4 -c c2=media/c2_landscape_noaudio.mp4 \
+  -c c3=media/c3_landscape_25fps.mp4 \
+  --product "ይርጋጨፌ ቡና" --price 1200 --old-price 1500 --highlight "ትኩስ የተቆላ ቡና" \
+  --voice standard -o out/promo.mp4 --fake
+# -> out/promo.mp4, out/promo.plan.json (edit and re-render with `adreel render`), out/promo.cost.json
+```
+
 With Docker:
 
 ```bash
@@ -42,6 +55,8 @@ docker run --rm -v "$PWD/examples:/work" -w /work adreel render -p plan_product_
 
 | Command | What it does |
 |---|---|
+| `adreel make -t TEMPLATE -b BRAND -c ID=FILE… [--product --price --old-price --highlight --target --cta --notes] [--voice none\|standard\|premium] [-q] [--watermark] [--fake]` | Fully automatic: transcribe → plan → voiceover → render, plus the plan and cost files |
+| `adreel transcribe FILE [-l am] [-o JSON] [--fake]` | Word-level transcript, printed as caption lines |
 | `adreel render -p PLAN -b BRAND -c ID=FILE… -o OUT [-q preview\|final] [--watermark] [--voiceover WAV] [--no-repair] [--no-face]` | Render a video |
 | `adreel validate -p PLAN [-c ID=FILE…] [--repair]` | Schema check; with clips, also checks durations and the template, and can print the auto-repaired plan |
 | `adreel schema [-o FILE]` | Dump the edit-plan JSON Schema (the contract Gemini fills in Phase 2) |
@@ -103,6 +118,60 @@ Key decisions:
 - **Caption fixes** (`EditPlan.with_caption_text(3, "…")`) change only text. Segments are
   cached by their inputs, so a re-render skips straight to the final compose (seconds, not
   minutes) and never calls the AI again.
+
+## AI layer (Phase 2)
+
+```
+clips ─▶ normalise ─▶ silences · scenes · 360p proxies ─▶ Scribe (only clips with speech; cached)
+      ─▶ Gemini: proxies + transcript lines + business context + template ─▶ PlannerOutput JSON
+      ─▶ validate · assemble · smart cuts · repair ─(problems? feed back, retry ≤3)─▶ EditPlan
+      ─▶ TTS (fit to video length) ─▶ render ─▶ out.mp4 + out.plan.json + out.cost.json
+```
+
+Each provider sits behind an interface (`ai/base.py`: `Transcriber`, `Planner`,
+`SpeechSynthesizer`). `ai/registry.py` is the only module that names a vendor, so switching
+one is a new class plus a config value. Shipped: ElevenLabs Scribe, Gemini (google-genai SDK),
+Azure Neural TTS (REST), ElevenLabs TTS, and key-free fakes plus a heuristic planner.
+
+Design decisions:
+
+- **The LLM judges; code does the precise work.** Gemini returns a small `PlannerOutput`
+  (`autoedit/schema.py`): which moments in which order, roles, on-screen text, hook and CTA,
+  the voiceover script, and *spelling fixes* for transcript lines, referenced by id. It never
+  writes caption timings: those come from Scribe's word timestamps, so they are exact, and
+  the tokens it would spend echoing timestamps are saved. `autoedit/assemble.py` builds the
+  `EditPlan`.
+- **Smart cuts are deterministic** (`autoedit/cuts.py`). Speaker segments are tightened to
+  word boundaries; pauses over 0.35 s and Amharic hesitation sounds (`እ…`, `ኧ`, `እም`…) are cut
+  out. Other segments that keep their sound snap to the nearest word edge, so a cut never
+  lands mid-word.
+- **Facts come from the business, not the model.** Price, old price and product name always
+  come from the answers (`BusinessContext`). Templates that need them refuse to start before
+  any money is spent.
+- **Validation with feedback.** Planner output goes through Pydantic, assembly,
+  `repair_plan` and `check_plan`. Remaining errors are sent back in the same conversation
+  ("Your JSON had these problems: …"), up to `ADREEL_PLAN_ATTEMPTS`. If every attempt fails,
+  or the provider is down, the heuristic planner still produces a video and the run is
+  flagged in its warnings.
+- **Cheap by construction.**
+  - Clips without speech are never transcribed.
+  - Transcripts are cached on disk, so re-planning or re-rendering never pays for speech
+    recognition twice.
+  - Gemini sees 360p / 10 fps proxies at `media_resolution=low`.
+  - Media goes inline when small and through the Files API (deleted afterwards) when large.
+- **Voiceover.** The script is word-budgeted in the prompt (~2.1 words/s). If the TTS audio
+  is still longer than the video, it is re-synthesised faster (up to 1.2× on ElevenLabs,
+  1.3× on Azure). The original sound is ducked under it and the voiceover becomes the
+  captions. ElevenLabs returns character timestamps, so its captions are exact; Azure's
+  REST API returns audio only, so word timings are estimated from the audio's pauses
+  (accurate per line, approximate per word).
+- **Cost log per run** (`out.cost.json`):
+  - billable units for every call: speech-recognition seconds, Gemini input/audio/output
+    tokens (thinking included), TTS characters
+  - USD and ETB at configurable prices (`ADREEL_PRICES__*`)
+  - which planner was used, how many attempts, and timings
+
+  Phase 3 stores these per job in Postgres.
 
 ## Templates
 
@@ -182,11 +251,18 @@ All settings are environment variables prefixed `ADREEL_` (or a `.env` file); se
 | `ADREEL_FFMPEG_THREADS` | `0` | Threads per ffmpeg call (0 = auto) |
 | `ADREEL_FFMPEG_TIMEOUT_S` | `900` | Hard timeout per ffmpeg call |
 | `ADREEL_LOG_LEVEL` / `ADREEL_LOG_JSON` | `INFO` / `false` | Structured logging |
+| `ADREEL_TRANSCRIBER` / `ADREEL_PLANNER` | `elevenlabs` / `gemini` | `fake` / `heuristic` need no keys |
+| `ADREEL_TTS_STANDARD` / `ADREEL_TTS_PREMIUM` | `azure` / `elevenlabs` | Voiceover providers (or `fake`) |
+| `ADREEL_ELEVENLABS_API_KEY`, `_STT_MODEL`, `_TTS_MODEL`, `_VOICE_ID` | –, `scribe_v1`, `eleven_v3`, – | ElevenLabs |
+| `ADREEL_GEMINI_API_KEY`, `_MODEL`, `_MEDIA_RESOLUTION`, `_THINKING_BUDGET` | –, `gemini-flash-latest`, `low`, model default | Gemini |
+| `ADREEL_AZURE_SPEECH_KEY`, `_REGION`, `_VOICE` | –, `eastus`, `am-ET-MekdesNeural` | Azure TTS |
+| `ADREEL_PLAN_ATTEMPTS` | `3` | Planner validate/retry rounds |
+| `ADREEL_PRICES__*` | list prices | Unit prices for the cost log (see `.env.example`) |
 
 ## Development
 
 ```bash
-pytest                 # 94 tests; the ffmpeg integration tests skip if ffmpeg is missing
+pytest                 # 132 tests, no network; the ffmpeg integration tests skip without ffmpeg
 ruff check src tests && ruff format --check src tests
 mypy src               # strict
 adreel schema -o docs/edit_plan.schema.json   # after changing the schema (a test checks it)
@@ -203,11 +279,27 @@ Test coverage:
   normalisation, contrast
 - `test_render_integration.py`: a real preview render, and a re-render after a caption fix
   that must skip the segment stage; also that libass finds every glyph in the bundled fonts
+- `test_ai_providers.py`:
+  - the cost maths and HTTP retries
+  - Scribe and ElevenLabs TTS requests and parsing, and Azure SSML and WAV handling, all
+    through `httpx.MockTransport`
+  - Gemini requests built with the real google-genai types against a fake client: inline
+    vs Files API, retries, usage parsing, and that the schema is accepted
+- `test_autoedit.py`: transcript lines, caption fixes, smart cuts, prompt contents,
+  assembly (facts from the business, dangling references) and the heuristic planner
+- `test_autoedit_integration.py`: real ffmpeg runs with a scripted planner. It returns
+  broken JSON, then a too-short plan, then a valid one (three attempts, three cost entries,
+  then a render). Also: a provider outage falls back to the heuristic, transcripts are
+  cached, and missing facts fail before any spending
 
-## Known limitations (Phase 1)
+## Known limitations
 
 - Cuts only (no transitions or speed ramps) and no background music yet.
 - The VO start time is set in the plan; caption timing for VO text arrives with TTS word
   boundaries in Phase 2.
 - Face tracking keeps the single most prominent face; two-person framing isn't handled.
 - A JPEG logo is composited as a rectangle (no background removal).
+- Azure word timings are estimated (see above). Switch the standard tier to the Speech SDK
+  if per-word highlight accuracy on standard voices matters.
+- Prices in the cost log are configurable list prices, not invoices: check them against
+  your plans.

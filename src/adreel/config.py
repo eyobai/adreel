@@ -4,9 +4,12 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from adreel.ai.costs import Prices
 
 PACKAGE_DIR = Path(__file__).resolve().parent
 ASSETS_DIR = PACKAGE_DIR / "assets"
@@ -15,7 +18,11 @@ BUILTIN_TEMPLATES_DIR = PACKAGE_DIR / "templates"
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_prefix="ADREEL_", env_file=".env", env_file_encoding="utf-8", extra="ignore"
+        env_prefix="ADREEL_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        env_nested_delimiter="__",  # e.g. ADREEL_PRICES__TTS_AZURE_PER_MCHAR=15
+        extra="ignore",
     )
 
     # --- binaries / limits -------------------------------------------------
@@ -35,6 +42,36 @@ class Settings(BaseSettings):
     # --- rendering -----------------------------------------------------------
     face_tracking: bool = True
     watermark_text: str = "Made with AdReel"
+
+    # --- AI providers (Phase 2) -----------------------------------------------
+    # "fake"/"heuristic" providers need no keys: for tests, demos and outages.
+    transcriber: Literal["elevenlabs", "fake"] = "elevenlabs"
+    planner: Literal["gemini", "heuristic"] = "gemini"
+    tts_standard: Literal["azure", "fake"] = "azure"
+    tts_premium: Literal["elevenlabs", "azure", "fake"] = "elevenlabs"
+    http_timeout_s: float = Field(120.0, gt=0)
+
+    elevenlabs_api_key: SecretStr | None = None
+    elevenlabs_base_url: str = "https://api.elevenlabs.io"
+    elevenlabs_stt_model: str = "scribe_v1"
+    elevenlabs_tts_model: str = "eleven_v3"
+    elevenlabs_voice_id: str | None = None  # required for premium voiceover
+    elevenlabs_tts_language: str | None = "am"  # sent as language_code when set
+
+    gemini_api_key: SecretStr | None = None
+    gemini_model: str = "gemini-flash-latest"
+    gemini_media_resolution: Literal["low", "medium", "high"] = "low"
+    gemini_thinking_budget: int | None = Field(None, ge=0, description="None = model default")
+    gemini_temperature: float = Field(0.4, ge=0, le=2)
+    gemini_inline_max_mb: float = Field(15.0, gt=0, description="Bigger media goes via Files API")
+    plan_attempts: int = Field(3, ge=1, le=5)
+
+    azure_speech_key: SecretStr | None = None
+    azure_speech_region: str = "eastus"
+    azure_voice: str = "am-ET-MekdesNeural"  # or am-ET-AmehaNeural
+
+    language: Literal["am", "en"] = "am"
+    prices: Prices = Field(default_factory=Prices)
 
     # --- logging -------------------------------------------------------------
     log_level: str = "INFO"
