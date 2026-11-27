@@ -160,3 +160,19 @@ def test_ethiopic_glyphs_render_with_bundled_fonts(tmp_path: Path) -> None:
     assert "failed to find any fallback" not in stderr
     assert "Glyph 0x" not in stderr
     assert (tmp_path / "frame.png").stat().st_size > 2000  # something was drawn
+
+
+def test_safe_progress_never_raises() -> None:
+    from adreel.render.pipeline import safe_progress
+
+    calls: list[str] = []
+
+    def bad(stage: str, frac: float) -> None:
+        calls.append(stage)
+        raise OSError("Windows error 6")
+
+    report = safe_progress(bad)
+    report("a", 0.1)
+    report("b", 0.2)  # disabled after the first failure
+    assert calls == ["a"]
+    safe_progress(None)("x", 1.0)

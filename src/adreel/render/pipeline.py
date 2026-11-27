@@ -137,7 +137,7 @@ class Renderer:
     # ------------------------------------------------------------------ public
 
     def render(self, req: RenderRequest, progress: ProgressFn | None = None) -> RenderResult:
-        report = progress or (lambda stage, frac: None)
+        report = safe_progress(progress)
         timings: dict[str, float] = {}
         warnings: list[str] = []
         tpl = self.templates.get(req.plan.template_id)
@@ -602,3 +602,26 @@ def concat_line(path: Path) -> str:
     backslash escaping; single quotes in the path are escaped the way the demuxer expects."""
     quoted = path.resolve().as_posix().replace("'", "'\\''")
     return f"file '{quoted}'\n"
+
+
+def safe_progress(progress: ProgressFn | None) -> ProgressFn:
+    """Wrap a progress callback so a failure in it never aborts the work.
+
+    Progress is cosmetic (a terminal line, a Telegram status message that may fail to
+    edit). On the first error the callback is disabled and the error logged once.
+    """
+    if progress is None:
+        return lambda stage, frac: None
+    broken = False
+
+    def report(stage: str, frac: float) -> None:
+        nonlocal broken
+        if broken:
+            return
+        try:
+            progress(stage, frac)
+        except Exception as exc:
+            broken = True
+            log.warning("progress.disabled", error=f"{type(exc).__name__}: {exc}")
+
+    return report

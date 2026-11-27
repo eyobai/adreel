@@ -37,6 +37,19 @@ def _main(verbose: Annotated[bool, typer.Option("--verbose", "-v")] = False) -> 
     configure_logging("DEBUG" if verbose else s.log_level, s.log_json)
 
 
+def _status(line: str) -> None:
+    """Rewrite the one-line progress indicator on stderr.
+
+    Plain ``sys.stderr`` rather than ``typer.echo``: on Windows, click caches a console
+    handle that native libraries (MediaPipe) can invalidate, raising "Windows error 6".
+    """
+    try:
+        sys.stderr.write(f"\r{line}")
+        sys.stderr.flush()
+    except OSError:
+        pass
+
+
 def _parse_clips(values: list[str]) -> dict[str, Path]:
     clips: dict[str, Path] = {}
     for v in values:
@@ -120,7 +133,7 @@ def render(
     def progress(stage: str, frac: float) -> None:
         pct = int(frac * 100)
         if pct != last[0] and sys.stderr.isatty():
-            typer.echo(f"\r{stage:<10} {pct:3d}%", err=True, nl=False)
+            _status(f"{stage:<10} {pct:3d}%")
             last[0] = pct
 
     try:
@@ -218,7 +231,7 @@ def make(
     def progress(stage: str, frac: float) -> None:
         line = f"{stage:<18} {int(frac * 100):3d}%"
         if line != last[0] and sys.stderr.isatty():
-            typer.echo(f"\r{line}", err=True, nl=False)
+            _status(line)
             last[0] = line
 
     try:

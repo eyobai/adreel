@@ -15,6 +15,7 @@ The math is pure and unit-tested. MediaPipe is an optional extra (``adreel[face]
 from __future__ import annotations
 
 import itertools
+import os
 import statistics
 import subprocess
 from collections.abc import Sequence
@@ -214,6 +215,9 @@ class MediaPipeFaceTracker:
         tile_frac: float = 0.6,
         min_confidence: float = 0.5,
     ) -> None:
+        # Silence MediaPipe/TFLite native INFO/WARNING spam (must be set before import).
+        os.environ.setdefault("GLOG_minloglevel", "2")
+        os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
         try:
             import mediapipe as mp  # noqa: F401
             import numpy  # noqa: F401

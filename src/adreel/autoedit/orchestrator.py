@@ -54,7 +54,13 @@ from adreel.config import Settings, get_settings
 from adreel.log import get_logger
 from adreel.plan_checks import check_plan, planned_duration, repair_plan
 from adreel.render.normalize import NormalizeParams, normalize_clip
-from adreel.render.pipeline import Quality, Renderer, RenderRequest, RenderResult
+from adreel.render.pipeline import (
+    Quality,
+    Renderer,
+    RenderRequest,
+    RenderResult,
+    safe_progress,
+)
 from adreel.schemas.brand_kit import BrandKit
 from adreel.schemas.edit_plan import EditPlan, Voiceover, VoiceTier
 from adreel.schemas.template import TemplateSpec
@@ -124,7 +130,7 @@ class AutoEditor:
     # ------------------------------------------------------------------ main
 
     def run(self, req: AutoEditRequest, progress: ProgressFn | None = None) -> AutoEditResult:
-        report = progress or (lambda stage, frac: None)
+        report = safe_progress(progress)
         tpl = self.renderer.templates.get(req.template_id)
         lang = req.language or req.brand.language
         self._check_context(tpl, req.context)
