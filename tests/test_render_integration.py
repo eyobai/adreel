@@ -114,6 +114,11 @@ def test_render_preview_end_to_end(
     info = FFmpeg().probe(res.output)
     assert info.has_audio and info.fps == pytest.approx(30)
     assert stages[-1] == "done" and "compose" in stages
+    # Uniform colour metadata on every concatenated intermediate: ffmpeg 7+ otherwise
+    # rebuilds the filter graph mid-stream and stalls on the looped logo input.
+    segs = sorted((tmp_path / "work" / "seg").glob("*.mkv"))
+    assert segs and {FFmpeg().probe(f).color_space for f in segs} == {"bt709"}
+    assert info.color_space == "bt709"
     assert res.captions and res.warnings == []
 
     # Fix-captions flow: only the compose step re-runs.

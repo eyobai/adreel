@@ -29,7 +29,7 @@ from adreel.config import Settings, get_settings
 from adreel.log import get_logger
 from adreel.plan_checks import PlanError, check_plan, repair_plan
 from adreel.render.captions import CaptionEvent
-from adreel.render.ffmpeg import FFmpeg
+from adreel.render.ffmpeg import BT709_FILTER, BT709_TAGS, FFmpeg
 from adreel.render.normalize import NormalizedClip, NormalizeParams, normalize_clip
 from adreel.render.overlays import LogoPlacement, build_overlays
 from adreel.render.reframe import (
@@ -341,7 +341,7 @@ class Renderer:
         seg = p.segment
         tracking = self.s.face_tracking and seg.reframe.mode in (ReframeMode.AUTO, ReframeMode.FACE)
         key = _key(
-            "seg-v1",
+            "seg-v2",
             clip.path.name,
             seg.start,
             p.frames,
@@ -373,7 +373,7 @@ class Renderer:
         vol = "" if seg.keep_audio else ",volume=0"
         fc = (
             decision.video_filter(out_w, out_h, "0:v", "vr")
-            + ";[vr]tpad=stop_mode=clone:stop_duration=2[v];"
+            + f";[vr]tpad=stop_mode=clone:stop_duration=2,{BT709_FILTER}[v];"
             + f"[0:a]asetpts=PTS-STARTPTS{vol},apad,atrim=0:{dur:.6f}[a]"
         )
         tmp = dst.with_suffix(".part.mkv")
@@ -401,6 +401,7 @@ class Renderer:
                 str(preset.seg_crf),
                 "-pix_fmt",
                 "yuv420p",
+                *BT709_TAGS,
                 "-c:a",
                 "pcm_s16le",
                 "-ar",
@@ -426,7 +427,7 @@ class Renderer:
 
         bg = Palette(brand)(tpl.end_card.background)
         fps = tpl.canvas.fps
-        key = _key("end-v1", bg, out_w, out_h, fps, tl.end_card_frames, preset.seg_crf)
+        key = _key("end-v2", bg, out_w, out_h, fps, tl.end_card_frames, preset.seg_crf)
         dst = self.s.work_dir.resolve() / "seg" / f"end_{key}.mkv"
         if dst.exists():
             return dst
@@ -444,7 +445,7 @@ class Renderer:
                 "-i",
                 "anullsrc=r=48000:cl=stereo",
                 "-vf",
-                "vignette=angle=PI/5,format=yuv420p,setsar=1",
+                f"vignette=angle=PI/5,format=yuv420p,setsar=1,{BT709_FILTER}",
                 "-frames:v",
                 str(tl.end_card_frames),
                 "-af",
@@ -455,6 +456,7 @@ class Renderer:
                 preset.seg_preset,
                 "-crf",
                 str(preset.seg_crf),
+                *BT709_TAGS,
                 "-c:a",
                 "pcm_s16le",
                 "-ar",
@@ -484,7 +486,8 @@ class Renderer:
         total = tl.total_duration
         fps = tpl.canvas.fps
         k = out_w / tpl.canvas.width  # canvas px -> output px
-        args = ["-f", "concat", "-safe", "0", "-i", "concat.txt"]
+        # -reinit_filter 0: never rebuild the graph mid-stream (see BT709_FILTER).
+        args = ["-reinit_filter", "0", "-f", "concat", "-safe", "0", "-i", "concat.txt"]
         chains: list[str] = []
         cur = "0:v"
         next_in = 1
@@ -561,6 +564,7 @@ class Renderer:
             "high",
             "-pix_fmt",
             "yuv420p",
+            *BT709_TAGS,
         ]
         if preset.maxrate:
             args += [
