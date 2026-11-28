@@ -382,5 +382,64 @@ def samples(
         _say(f"  {p}")
 
 
+# --------------------------------------------------------------------------- Phase 3
+
+db_app = typer.Typer(help="Database migrations")
+app.add_typer(db_app, name="db")
+
+
+@db_app.command("upgrade")
+def db_upgrade(revision: Annotated[str, typer.Argument()] = "head") -> None:
+    """Apply migrations (ADREEL_DATABASE_URL)."""
+    from adreel.db.migrate import upgrade
+
+    upgrade(get_settings().database_url, revision)
+    _say(f"✓ database at {revision}", color="green")
+
+
+@db_app.command("downgrade")
+def db_downgrade(revision: Annotated[str, typer.Argument()]) -> None:
+    """Roll migrations back to REVISION (e.g. base)."""
+    from adreel.db.migrate import downgrade
+
+    downgrade(get_settings().database_url, revision)
+    _say(f"✓ database at {revision}", color="green")
+
+
+@app.command()
+def bot() -> None:
+    """Run the Telegram bot (long polling)."""
+    import asyncio
+
+    from adreel.bot.app import run_polling
+
+    s = get_settings()
+    if s.queue_backend == "inline":
+        _say("queue: inline (jobs run inside this process; no Redis needed)", err=True)
+    asyncio.run(run_polling(s))
+
+
+@app.command()
+def worker(
+    burst: Annotated[bool, typer.Option(help="Exit when the queue is empty")] = False,
+) -> None:
+    """Run a render worker (Redis + RQ). Start as many as your CPUs allow."""
+    if os.name == "nt":
+        _say(
+            "RQ workers need fork() and can't run on Windows. Use Docker (docker compose up), WSL, "
+            "or ADREEL_QUEUE_BACKEND=inline to run jobs inside the bot process.",
+            err=True,
+            color="red",
+        )
+        raise typer.Exit(1)
+    from redis import Redis
+    from rq import Queue, Worker
+
+    s = get_settings()
+    conn = Redis.from_url(s.redis_url)
+    w = Worker([Queue(s.queue_name, connection=conn)], connection=conn)
+    w.work(with_scheduler=True, burst=burst)  # scheduler: delayed retries
+
+
 if __name__ == "__main__":  # pragma: no cover
     app()

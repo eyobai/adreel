@@ -7,8 +7,8 @@ Ethiopia and delivered as a Telegram bot.
 | Phase | Scope | Status |
 |---|---|---|
 | 1 | Render engine + CLI (clips + edit plan + brand kit → video) | done |
-| 2 | AI layer: Scribe transcription, Gemini edit plan, Azure/ElevenLabs TTS, cost log | **done** |
-| 3 | Telegram bot (aiogram 3), Redis/RQ worker, Postgres, preview/approve/fix-captions | |
+| 2 | AI layer: Scribe transcription, Gemini edit plan, Azure/ElevenLabs TTS, cost log | done |
+| 3 | Telegram bot (aiogram 3), Redis/RQ worker, Postgres, preview/approve/fix-captions | **done** |
 | 4 | Credits ledger, Chapa payments, admin `/stats` | |
 
 ## Quick start (local)
@@ -57,6 +57,9 @@ docker run --rm -v "$PWD/examples:/work" -w /work adreel render -p plan_product_
 |---|---|
 | `adreel make -t TEMPLATE -b BRAND -c ID=FILE… [--product --price --old-price --highlight --target --cta --notes] [--voice none\|standard\|premium] [-q] [--watermark] [--fake]` | Fully automatic: transcribe → plan → voiceover → render, plus the plan and cost files |
 | `adreel transcribe FILE [-l am] [-o JSON] [--fake]` | Word-level transcript, printed as caption lines |
+| `adreel bot` | Run the Telegram bot (long polling) |
+| `adreel worker [--burst]` | Run an RQ render worker |
+| `adreel db upgrade [REV]` / `adreel db downgrade REV` | Database migrations |
 | `adreel render -p PLAN -b BRAND -c ID=FILE… -o OUT [-q preview\|final] [--watermark] [--voiceover WAV] [--no-repair] [--no-face]` | Render a video |
 | `adreel validate -p PLAN [-c ID=FILE…] [--repair]` | Schema check; with clips, also checks durations and the template, and can print the auto-repaired plan |
 | `adreel schema [-o FILE]` | Dump the edit-plan JSON Schema (the contract Gemini fills in Phase 2) |
@@ -66,6 +69,86 @@ docker run --rm -v "$PWD/examples:/work" -w /work adreel render -p plan_product_
 `-q preview` renders 540×960 at ~1 Mbit/s (a 30 s preview is ~2–4 MB, for slow mobile
 connections). `-q final` renders 1080×1920 at CRF 19 (sent as a document so Telegram does not
 recompress it).
+
+## Telegram bot (Phase 3)
+
+### Run it
+
+1. Create a bot with [@BotFather](https://t.me/BotFather) and copy the token.
+2. `cp .env.example .env`, then set `ADREEL_TELEGRAM_BOT_TOKEN` and your AI keys. With
+   no AI keys, add `ADREEL_TRANSCRIBER=fake`, `ADREEL_PLANNER=heuristic` and
+   `ADREEL_TTS_STANDARD=fake` to try the flow.
+
+**Everything in one process.** Works on Windows, with no Docker, Redis or Postgres:
+
+```bash
+adreel db upgrade        # creates adreel.db (SQLite)
+adreel bot               # ADREEL_QUEUE_BACKEND=inline: renders run on a background thread
+```
+
+**Production-like stack.** Docker Compose with Postgres, Redis, migrations, the bot and an
+RQ worker:
+
+```bash
+docker compose up --build
+docker compose up --scale worker=3     # more parallel renders
+```
+
+For videos over 20 MB, run the self-hosted Bot API server. Set its keys in `.env`
+(`TELEGRAM_API_ID/HASH`, `ADREEL_TELEGRAM_API_BASE`, `ADREEL_TELEGRAM_LOCAL_MODE`), then
+start it with `docker compose --profile local-api up`.
+
+### What the user sees
+
+```
+/start  → language → business name → type → logo (or skip) → colour → phone → Telegram handle
+/new    → template → send 1–5 clips (Done) → product, price (promo) → what to highlight → voice
+        → "⏳ Checking your clips… 35% ▓▓▓░░░░░░░" (one message, edited as the job runs)
+        → preview video  [✅ Approve] [✏️ Fix captions] [🔁 Redo]
+Fix     → numbered captions; reply "3: corrected text" (several lines at once) → re-render, no AI
+Redo    → a fresh AI edit (2 free per video)
+Approve → full-quality MP4 sent as a document (no Telegram recompression)
+/brand  /lang  /help  /cancel
+```
+
+Messages are in Amharic by default, with English via `/lang`. The catalogue is
+`src/adreel/i18n.py`; have a native speaker review it before launch.
+
+### Architecture
+
+```
+Telegram ⇄ bot (aiogram 3, async) ──writes──▶ Postgres (users, brand_kits, projects, clips, jobs, api_costs)
+              │ enqueue job id                       ▲
+              ▼                                      │ status, plan, costs
+           Redis/RQ ──▶ worker (sync) ── downloads clips from Telegram once → storage (local/S3)
+                                  └── AutoEditor / Renderer → upload preview/final → Telegram
+```
+
+- **The bot never renders.** It only records Telegram file IDs, so it stays fast on slow
+  connections. Workers download clips once and keep them in storage, so caption fixes,
+  redos and the final render never download again.
+- **Interrupted uploads are resumable.** Clips already received stay with the draft
+  project, and `/new` offers to continue.
+- **Jobs:**
+  - `auto_edit`: the AI pipeline, ending in a preview
+  - `rerender`: the stored plan after caption fixes, ending in a preview
+  - `final`: full quality, delivered as a document
+
+  Each job has a hard timeout (`ADREEL_JOB_TIMEOUT_S`). Transient failures (provider
+  429/5xx, network, Telegram) are retried by RQ, with backoff up to `ADREEL_JOB_RETRIES`
+  times. Other failures end the job with a clear message to the user. A failed re-render
+  keeps the earlier preview's buttons working.
+- **Limits:**
+  - one active job per user
+  - `ADREEL_RATE_LIMIT_VIDEOS_PER_HOUR`
+  - a flood guard on messages and taps
+  - clip count, length and size checks when clips arrive, and again after download
+- **Storage** sits behind `storage.Storage`: local disk or any S3-compatible service
+  (AWS, Cloudflare R2, MinIO). Install with `pip install -e ".[s3]"`.
+- **Migrations:** Alembic, run as `adreel db upgrade`. In Compose a one-shot `migrate`
+  service runs them before the bot and worker start.
+- **Worker platform:** RQ workers need `fork()`, so they run on Linux and macOS (Docker on
+  Windows). On Windows without Docker, use `ADREEL_QUEUE_BACKEND=inline`.
 
 ## The edit plan
 
@@ -262,7 +345,7 @@ All settings are environment variables prefixed `ADREEL_` (or a `.env` file); se
 ## Development
 
 ```bash
-pytest                 # 132 tests, no network; the ffmpeg integration tests skip without ffmpeg
+pytest                 # 172 tests, no network; the ffmpeg integration tests skip without ffmpeg
 ruff check src tests && ruff format --check src tests
 mypy src               # strict
 adreel schema -o docs/edit_plan.schema.json   # after changing the schema (a test checks it)
@@ -287,6 +370,23 @@ Test coverage:
     vs Files API, retries, usage parsing, and that the schema is accepted
 - `test_autoedit.py`: transcript lines, caption fixes, smart cuts, prompt contents,
   assembly (facts from the business, dangling references) and the heuristic planner
+- `test_bot.py`: whole conversations through the real aiogram dispatcher, with a mocked
+  Telegram session and SQLite:
+  - onboarding and brand edits, including logo upload
+  - `/new`: clip validation, duplicate clips, resuming a draft, the hourly limit
+  - preview actions: fix captions (including Ethiopic numerals), approve, the redo
+    limit, double taps, other users' buttons
+  - flood control
+- `test_jobs.py`: the worker against SQLite, local storage and a fake Telegram:
+  - preview, then a caption-fix re-render by a fresh worker that pulls clips from
+    storage, then the final as a document
+  - a failure the user can fix
+  - a transient failure that is retried, then fails cleanly
+- `test_phase3_units.py`:
+  - parsing: price, colour, phone, handle, caption fixes
+  - every message present in both languages with matching placeholders
+  - the Bot API client: 429 retry, local-mode files
+  - storage path safety, database URLs, the inline queue, RQ enqueue options
 - `test_autoedit_integration.py`: real ffmpeg runs with a scripted planner. It returns
   broken JSON, then a too-short plan, then a valid one (three attempts, three cost entries,
   then a render). Also: a provider outage falls back to the heuristic, transcripts are

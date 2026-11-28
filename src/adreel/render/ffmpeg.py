@@ -30,9 +30,17 @@ ProgressCb = Callable[[float], None]
 # ended. Uniform tags (plus -reinit_filter 0 on the compose input) prevent that.
 BT709_FILTER = "setparams=colorspace=bt709:color_primaries=bt709:color_trc=bt709:range=tv"
 BT709_TAGS = [
-    "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709",
-    "-color_range", "tv", "-chroma_sample_location", "left",
-]  # fmt: skip
+    "-colorspace",
+    "bt709",
+    "-color_primaries",
+    "bt709",
+    "-color_trc",
+    "bt709",
+    "-color_range",
+    "tv",
+    "-chroma_sample_location",
+    "left",
+]
 SD_MATRICES = {"bt470bg", "smpte170m", "bt601"}  # seconds of output written so far
 
 
