@@ -43,7 +43,7 @@ from adreel.bot.services import (
     save_brand,
     videos_last_hour,
 )
-from adreel.bot.states import BrandForm, FixCaptions, NewVideo
+from adreel.bot.states import BrandForm, ChangeRequest, FixCaptions, NewVideo
 from adreel.config import Settings
 from adreel.db.models import JobKind, Project, ProjectStatus, User
 from adreel.i18n import is_skip, normalize_lang, t
@@ -577,11 +577,17 @@ async def on_voice(
 
 
 async def _start_job(
-    db: AsyncSession, target: Message, project: Project, kind: JobKind, text: str, queue: JobQueue
+    db: AsyncSession,
+    target: Message,
+    project: Project,
+    kind: JobKind,
+    text: str,
+    queue: JobQueue,
+    params: dict[str, Any] | None = None,
 ) -> None:
     status = await target.answer(text)
     project.chat_id = status.chat.id
-    job = await create_job(db, project, kind, status.message_id)
+    job = await create_job(db, project, kind, status.message_id, params)
     await db.commit()  # the worker must see the job before it runs
     job.rq_job_id = await asyncio.to_thread(queue.enqueue, str(job.id))
     log.info("job.enqueued", job=str(job.id), kind=kind.value, project=str(project.id))
@@ -628,6 +634,16 @@ async def on_preview_action(
         for chunk in _chunks(t("fix_intro", lang, listing=caption_listing(plan.captions))):
             await target.answer(chunk)
         return
+    if parsed.action == "change":
+        # Changes are AI re-edits: they share the free-redo allowance.
+        if project.redo_count >= settings.max_redos:
+            await cb.answer(t("redo_limit", lang), show_alert=True)
+            return
+        await cb.answer()
+        await state.set_state(ChangeRequest.waiting)
+        await state.update_data(project_id=str(project.id))
+        await target.answer(t("ask_change", lang))
+        return
     if parsed.action == "redo":
         if project.redo_count >= settings.max_redos:
             await cb.answer(t("redo_limit", lang), show_alert=True)
@@ -643,6 +659,51 @@ async def on_preview_action(
     await cb.answer()  # approve
     await _drop_keyboard(cb)
     await _start_job(db, target, project, JobKind.FINAL, t("final_rendering", lang), queue)
+
+
+@router.message(ChangeRequest.waiting, F.text)
+async def on_change_request(
+    message: Message,
+    state: FSMContext,
+    db: AsyncSession,
+    user: User,
+    lang: str,
+    settings: Settings,
+    queue: JobQueue,
+) -> None:
+    instruction = clean_text(message.text, 500)
+    if instruction is None:
+        await message.answer(t("bad_change", lang))
+        return
+    data = await state.get_data()
+    project = (
+        await get_project(db, data.get("project_id", ""), user.id)
+        if data.get("project_id")
+        else None
+    )
+    if project is None or project.status != ProjectStatus.PREVIEW_READY or not project.plan:
+        await state.clear()
+        await message.answer(t("not_ready", lang))
+        return
+    if project.redo_count >= settings.max_redos:
+        await state.clear()
+        await message.answer(t("redo_limit", lang))
+        return
+    if await has_active_job(db, user.id):
+        await message.answer(t("busy", lang))
+        return
+    project.redo_count += 1
+    await state.clear()
+    left = settings.max_redos - project.redo_count
+    await _start_job(
+        db,
+        message,
+        project,
+        JobKind.REVISE,
+        t("change_started", lang, left=left),
+        queue,
+        params={"instruction": instruction},
+    )
 
 
 @router.message(FixCaptions.waiting, F.text)

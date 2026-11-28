@@ -439,6 +439,28 @@ async def test_approve_and_redo(h: Harness) -> None:
 
 
 @pytest.mark.asyncio
+async def test_change_something_with_a_prompt(h: Harness) -> None:
+    pid = await _ready_project(h, redo_count=1)
+    await h.tap(f"pv:c:{pid}")
+    assert h.tg.last_text() == t("ask_change", "am")
+    await h.send("x" * 600)
+    assert h.tg.last_text() == t("bad_change", "am")
+    await h.send("ዋጋውን መጀመሪያ ላይ አሳይ፣ ቀለሙን ሞቅ አድርገው")
+    assert h.tg.last_text() == t("change_started", "am", left=0)
+    async with await h.db() as db:
+        job = await db.scalar(select(Job))
+        project = await db.scalar(select(Project))
+        assert job and project and job.kind == JobKind.REVISE and project.redo_count == 2
+        assert job.params == {"instruction": "ዋጋውን መጀመሪያ ላይ አሳይ፣ ቀለሙን ሞቅ አድርገው"}
+        project.status = ProjectStatus.PREVIEW_READY
+        job.status = JobStatus.SUCCEEDED
+        await db.commit()
+    await h.tap(f"pv:c:{pid}")  # free changes used up (shared with redo)
+    assert t("redo_limit", "am") in h.tg.alerts()
+    assert len(h.queue.jobs) == 1
+
+
+@pytest.mark.asyncio
 async def test_preview_buttons_of_other_users_are_rejected(h: Harness) -> None:
     pid = await _ready_project(h)
     async with await h.db() as db:

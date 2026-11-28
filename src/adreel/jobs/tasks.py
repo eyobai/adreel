@@ -20,7 +20,7 @@ from typing import Any
 import httpx
 
 from adreel.ai.base import ProviderError
-from adreel.autoedit.orchestrator import AutoEditor, AutoEditRequest
+from adreel.autoedit.orchestrator import AutoEditor, AutoEditRequest, RevisionError
 from adreel.autoedit.schema import BusinessContext
 from adreel.config import Settings, get_settings
 from adreel.db.models import (
@@ -74,6 +74,7 @@ class Snapshot:
     watermark: bool
     plan: dict[str, Any] | None
     clips: list[tuple[int, str, str | None]]  # (idx, telegram file_id, storage_key)
+    params: dict[str, Any]
     brand: dict[str, Any]
     logo_key: str | None
 
@@ -243,6 +244,7 @@ class JobRunner:
                     "language": project.language,
                 },
                 logo_key=brand.logo_key,
+                params=dict(job.params or {}),
             )
 
     def _succeed(self, snap: Snapshot, out: Outcome) -> None:
@@ -387,22 +389,37 @@ class JobRunner:
         clips = self._fetch_clips(snap, work, status, out)
         brand = self._brand(snap, work)
 
-        if snap.kind == JobKind.AUTO_EDIT:
+        note: str | None = None
+        if snap.kind in (JobKind.AUTO_EDIT, JobKind.REVISE):
             editor = self._editor_factory(self.renderer)
-            res = editor.run(
-                AutoEditRequest(
-                    template_id=snap.template_id,
-                    brand=brand,
-                    clips=clips,
-                    context=BusinessContext.model_validate(snap.context),
-                    output=work / "preview.mp4",
-                    voice=VoiceTier(snap.voice) if snap.voice else None,
-                    quality=Quality.PREVIEW,
-                    watermark=snap.watermark,
-                    language=snap.lang,
-                ),
-                lambda stage, frac: status(stage, 0.05 + 0.9 * frac),
+            request = AutoEditRequest(
+                template_id=snap.template_id,
+                brand=brand,
+                clips=clips,
+                context=BusinessContext.model_validate(snap.context),
+                output=work / "preview.mp4",
+                voice=VoiceTier(snap.voice) if snap.voice else None,
+                quality=Quality.PREVIEW,
+                watermark=snap.watermark,
+                language=snap.lang,
             )
+
+            def progress(stage: str, frac: float) -> None:
+                status(stage, 0.05 + 0.9 * frac)
+
+            if snap.kind == JobKind.REVISE:
+                if snap.plan is None:
+                    raise RuntimeError("project has no edit plan to revise")
+                current = self._resolve_voiceover(EditPlan.model_validate(snap.plan), work)
+                try:
+                    res = editor.revise(
+                        request, current, str(snap.params.get("instruction", "")), progress
+                    )
+                except RevisionError as exc:
+                    raise UserFacingError("revise_failed") from exc
+                note = res.message
+            else:
+                res = editor.run(request, progress)
             plan = res.plan
             if plan.voiceover and plan.voiceover.audio_path:
                 src = Path(plan.voiceover.audio_path)
@@ -483,7 +500,8 @@ class JobRunner:
             self.tg.send_video(
                 snap.chat_id,
                 video,
-                caption=t("preview_caption", snap.lang, secs=round(duration)),
+                caption=t("preview_caption", snap.lang, secs=round(duration))
+                + (f"\n\n💬 {note}" if note else ""),
                 reply_markup=preview_keyboard(snap.project_id, snap.lang),
                 width=size[0],
                 height=size[1],

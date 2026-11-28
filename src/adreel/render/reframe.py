@@ -300,8 +300,16 @@ class MediaPipeFaceTracker:
             self._detect_frames(raw, w, h, frame_bytes, side, tiles, out)
         return out
 
-    def _detect_frames(self, raw: bytes, w: int, h: int, frame_bytes: int, side: int,
-                       tiles: list[tuple[int, int]], out: list[Sample]) -> None:  # fmt: skip
+    def _detect_frames(
+        self,
+        raw: bytes,
+        w: int,
+        h: int,
+        frame_bytes: int,
+        side: int,
+        tiles: list[tuple[int, int]],
+        out: list[Sample],
+    ) -> None:
         import mediapipe as mp
         import numpy as np
 

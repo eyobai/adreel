@@ -62,8 +62,15 @@ def test_choose_template() -> None:
 
 def test_prompt_leads_with_the_brief(promo_tpl: TemplateSpec, brand: BrandKit) -> None:
     ctx = BusinessContext(brief="ፈቃት ማስታወቂያ፣ ዋጋው 500 ብር፣ ለወጣቶች", price=500)
-    p = build_prompt(template=promo_tpl, brand=brand, context=ctx, clips=[_clip("c1", 5, [])],
-                     lines=[], want_voiceover=False, language="am")  # fmt: skip
+    p = build_prompt(
+        template=promo_tpl,
+        brand=brand,
+        context=ctx,
+        clips=[_clip("c1", 5, [])],
+        lines=[],
+        want_voiceover=False,
+        language="am",
+    )
     assert p.startswith("## What the business wants")
     assert "ፈቃት ማስታወቂያ፣ ዋጋው 500 ብር፣ ለወጣቶች" in p
     system = build_system("am")
@@ -128,9 +135,30 @@ def _yavg(ff: FFmpeg, path: Path, tmp: Path) -> float:
 def test_dark_clip_is_brightened_in_the_render(tmp_path: Path) -> None:
     ff = FFmpeg()
     dark = tmp_path / "dark.mp4"
-    ff.run(["-f", "lavfi", "-i", "testsrc2=s=360x640:r=30:d=3", "-f", "lavfi", "-i", "sine=d=3",
-            "-vf", "lutyuv=y=val*0.35", "-c:v", "libx264", "-preset", "ultrafast",
-            "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", str(dark)])  # fmt: skip
+    ff.run(
+        [
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=s=360x640:r=30:d=3",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=d=3",
+            "-vf",
+            "lutyuv=y=val*0.35",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "ultrafast",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "aac",
+            "-shortest",
+            str(dark),
+        ]
+    )
     s = Settings(work_dir=tmp_path / "work", face_tracking=False)
     brand = BrandKit(business_name="x")
     outs = {}
@@ -138,8 +166,11 @@ def test_dark_clip_is_brightened_in_the_render(tmp_path: Path) -> None:
         plan = make_plan([("a", "c1", 0.0, 2.5)]).model_copy(update={"look": look})
         out = tmp_path / f"{look}.mp4"
         with Renderer(settings=s, face_tracker=None) as r:
-            r.render(RenderRequest(plan=plan, brand=brand, clips={"c1": dark}, output=out,
-                                   quality=Quality.PREVIEW))  # fmt: skip
+            r.render(
+                RenderRequest(
+                    plan=plan, brand=brand, clips={"c1": dark}, output=out, quality=Quality.PREVIEW
+                )
+            )
         # measure only the main part (before the end card)
         main = tmp_path / f"{look}_main.mp4"
         ff.run(["-i", str(out), "-t", "2", "-c", "copy", str(main)])

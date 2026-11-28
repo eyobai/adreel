@@ -143,6 +143,7 @@ class JobKind(StrEnum):
     AUTO_EDIT = "auto_edit"  # full AI pipeline -> preview
     RERENDER = "rerender"  # stored plan (caption fixes) -> preview
     FINAL = "final"  # stored plan -> full quality, sent as a document
+    REVISE = "revise"  # stored plan + the business's change request -> new preview
 
 
 class JobStatus(StrEnum):
@@ -164,6 +165,7 @@ class Job(TimestampMixin, Base):
     rq_job_id: Mapped[str | None] = mapped_column(String(64))
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     planner: Mapped[str | None] = mapped_column(String(20))
+    params: Mapped[dict[str, Any] | None] = mapped_column(JSONType)  # e.g. {"instruction": ...}
     cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
     video_seconds: Mapped[float | None] = mapped_column(Float)
     error: Mapped[str | None] = mapped_column(Text)

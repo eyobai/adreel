@@ -163,6 +163,20 @@ TEXTS: dict[str, dict[str, str]] = {
     "btn_approve": {"am": "✅ አጽድቅ", "en": "✅ Approve"},
     "btn_fix": {"am": "✏️ ጽሑፍ አስተካክል", "en": "✏️ Fix captions"},
     "btn_redo": {"am": "🔁 እንደገና", "en": "🔁 Redo"},
+    "btn_change": {"am": "💬 የሆነ ነገር ቀይርልኝ", "en": "💬 Change something"},
+    "ask_change": {
+        "am": "💬 ምን እንዲቀየር ይፈልጋሉ? በራስዎ ቃላት ይጻፉ።\nለምሳሌ፦ «ዋጋውን መጀመሪያ ላይ አሳይ»፣ «አጠር አድርገው»፣ «ቀለሙን ሞቅ አድርገው»፣ «ዋጋውን ወደ 400 ብር ቀይር»",
+        "en": '💬 What should we change? Write it in your own words.\nFor example: "show the price at the start", "make it shorter", "warmer colours", "change the price to 400 birr"',
+    },
+    "bad_change": {"am": "እባክዎ ከ500 ፊደል ባነሰ ይጻፉ።", "en": "Please keep it under 500 characters."},
+    "change_started": {
+        "am": "💬 ለውጡን እየሰራን ነው… ({left} ነጻ ሙከራ ቀርቷል)",
+        "en": "💬 Applying your change… ({left} free change(s) left)",
+    },
+    "revise_failed": {
+        "am": "ይቅርታ፣ ይህን ለውጥ ማድረግ አልቻልንም። በሌላ አባባል ደግመው ይሞክሩ፤ ቀደም ያለው ቅድመ-እይታ አሁንም ይሰራል።",
+        "en": "Sorry, we couldn't apply that change. Try wording it differently; your earlier preview still works.",
+    },
     "fix_intro": {
         "am": "ጽሑፎቹ እነዚህ ናቸው። ለማስተካከል ቁጥሩንና ትክክለኛውን ጽሑፍ ይላኩ፣ ለምሳሌ፦\n3: ትክክለኛው ጽሑፍ\n(ብዙ መስመሮችን በአንድ መልእክት መላክ ይቻላል።)\n\n{listing}",
         "en": "Here are the captions. To fix one, send its number and the correct text, e.g.\n3: corrected text\n(You can fix several lines in one message.)\n\n{listing}",

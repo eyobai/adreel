@@ -56,6 +56,12 @@ class PlannerOutput(_Strict):
     slots: TemplateSlots = TemplateSlots()
     price_card_segment_id: Ident | None = None
     voiceover_script: str | None = Field(None, max_length=1500)
+    message: str | None = Field(
+        None,
+        max_length=300,
+        description="Revisions only: a short note to the business when part of their request "
+        "could not be done (in their language); otherwise null",
+    )
     look: Literal["natural", "vivid", "warm", "cool"] = Field(
         "natural", description="Colour look: vivid for food/products, warm for cafés, cool for tech"
     )

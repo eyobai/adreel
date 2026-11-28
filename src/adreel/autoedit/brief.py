@@ -46,6 +46,11 @@ def first_phrase(text: str | None, max_chars: int = 40) -> str | None:
 AUTO_TEMPLATE = "auto"  # let the system pick the template from the footage
 
 LOOK_BY_BUSINESS = {
-    "cafe": "warm", "restaurant": "warm", "boutique": "vivid", "salon": "vivid",
-    "shop": "vivid", "gym": "cool", "other": "natural",
-}  # fmt: skip
+    "cafe": "warm",
+    "restaurant": "warm",
+    "boutique": "vivid",
+    "salon": "vivid",
+    "shop": "vivid",
+    "gym": "cool",
+    "other": "natural",
+}

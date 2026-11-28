@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import timedelta
+from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -168,9 +169,13 @@ async def videos_last_hour(db: AsyncSession, user_id: int) -> int:
 
 
 async def create_job(
-    db: AsyncSession, project: Project, kind: JobKind, status_message_id: int | None
+    db: AsyncSession,
+    project: Project,
+    kind: JobKind,
+    status_message_id: int | None,
+    params: dict[str, Any] | None = None,
 ) -> Job:
-    job = Job(project_id=project.id, kind=kind)
+    job = Job(project_id=project.id, kind=kind, params=params)
     db.add(job)
     project.status = (
         ProjectStatus.QUEUED if kind != JobKind.FINAL else ProjectStatus.RENDERING_FINAL

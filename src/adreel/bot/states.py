@@ -22,3 +22,7 @@ class NewVideo(StatesGroup):
 
 class FixCaptions(StatesGroup):
     waiting = State()
+
+
+class ChangeRequest(StatesGroup):
+    waiting = State()

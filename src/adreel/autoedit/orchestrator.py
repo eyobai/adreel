@@ -43,7 +43,13 @@ from adreel.analysis import (
 from adreel.autoedit.assemble import assemble_plan
 from adreel.autoedit.brief import AUTO_TEMPLATE, LOOK_BY_BUSINESS, extract_price
 from adreel.autoedit.heuristic import heuristic_plan
-from adreel.autoedit.prompt import ClipAnalysis, build_prompt, build_system, format_problems
+from adreel.autoedit.prompt import (
+    ClipAnalysis,
+    build_prompt,
+    build_revision_prompt,
+    build_system,
+    format_problems,
+)
 from adreel.autoedit.schema import BusinessContext, PlannerOutput
 from adreel.autoedit.transcript_lines import (
     TranscriptLine,
@@ -64,7 +70,7 @@ from adreel.render.pipeline import (
     safe_progress,
 )
 from adreel.schemas.brand_kit import BrandKit
-from adreel.schemas.edit_plan import EditPlan, Voiceover, VoiceTier
+from adreel.schemas.edit_plan import CaptionLine, EditPlan, Timebase, Voiceover, VoiceTier
 from adreel.schemas.template import TemplateSpec
 
 log = get_logger(__name__)
@@ -87,6 +93,14 @@ def choose_template(analyses: list[ClipAnalysis], ctx: BusinessContext) -> str:
 
 class AutoEditError(RuntimeError):
     pass
+
+
+class RevisionError(AutoEditError):
+    """A requested change could not be made. ``reason``: needs_ai | not_applied."""
+
+    def __init__(self, reason: str, detail: str) -> None:
+        self.reason = reason
+        super().__init__(f"{reason}: {detail}")
 
 
 @dataclass
@@ -113,6 +127,58 @@ class AutoEditResult:
     attempts: int
     warnings: list[str] = field(default_factory=list)
     timings: dict[str, float] = field(default_factory=dict)
+    message: str | None = None  # planner's note to the business (revisions)
+
+
+@dataclass
+class _Prepared:
+    """Everything planning needs, shared by run() and revise()."""
+
+    req: AutoEditRequest
+    tpl: TemplateSpec
+    lang: str
+    analyses: list[ClipAnalysis]
+    lines: list[TranscriptLine]
+    words_by_clip: dict[str, tuple[TranscriptWord, ...]]
+    durations: dict[str, float]
+    job: Path
+    costs: CostLog
+    warnings: list[str]
+    timings: dict[str, float]
+    base_fixes: dict[int, str] = field(default_factory=dict)  # caption fixes to keep
+
+    def assemble(self, out: PlannerOutput) -> EditPlan:
+        return assemble_plan(
+            out,
+            template=self.tpl,
+            language=self.lang,
+            context=self.req.context,
+            lines=self.lines,
+            words_by_clip=self.words_by_clip,
+            clip_durations=self.durations,
+            base_fixes=self.base_fixes,
+        )
+
+
+def carry_fixes(lines: list[TranscriptLine], captions: list[CaptionLine]) -> dict[int, str]:
+    """Caption texts the business (or an earlier plan) changed, keyed by transcript line id.
+
+    Source captions were built from these same lines, so they match on clip and timing.
+    """
+    fixes: dict[int, str] = {}
+    for c in captions:
+        if c.timebase is not Timebase.SOURCE:
+            continue
+        for ln in lines:
+            if (
+                ln.clip_id == c.clip_id
+                and abs(ln.start - c.start) < 0.06
+                and abs(ln.end - c.end) < 0.06
+            ):
+                if c.text != ln.text:
+                    fixes[ln.id] = c.text
+                break
+    return fixes
 
 
 class AutoEditor:
@@ -144,11 +210,146 @@ class AutoEditor:
     # ------------------------------------------------------------------ main
 
     def run(self, req: AutoEditRequest, progress: ProgressFn | None = None) -> AutoEditResult:
+        """Edit raw clips from scratch."""
         report = safe_progress(progress)
         # Facts in the free-text brief (the price) are read by code, never by the LLM.
         ctx = req.context
         if ctx.brief and ctx.price is None:
             ctx = ctx.model_copy(update={"price": extract_price(ctx.brief)})
+        p = self._prepare(dataclasses.replace(req, context=ctx), report)
+
+        t0 = time.monotonic()
+        report("plan", 0.25)
+        out, plan, planner_used, attempts = self._plan(
+            p.req,
+            p.tpl,
+            p.lang,
+            p.analyses,
+            p.lines,
+            p.req.voice is not None,
+            p.assemble,
+            p.durations,
+            p.costs,
+            p.warnings,
+        )
+        p.timings["plan"] = time.monotonic() - t0
+        report("plan", 0.42)
+
+        t0 = time.monotonic()
+        if p.req.voice is not None:
+            plan = self._voiceover(
+                p.req.voice, out, plan, p.tpl, p.lang, p.job, p.costs, p.warnings
+            )
+        plan = finalize_captions(plan, p.tpl.canvas.fps)
+        p.timings["voiceover"] = time.monotonic() - t0
+        report("voiceover", 0.5)
+        return self._finish(p, plan, planner_used, attempts, report)
+
+    def revise(
+        self,
+        req: AutoEditRequest,
+        current: EditPlan,
+        instruction: str,
+        progress: ProgressFn | None = None,
+    ) -> AutoEditResult:
+        """Change an existing edit as the business asked, in their own words.
+
+        The planner sees the current edit and returns a complete revised one; caption
+        fixes already made are kept, transcripts come from the cache, and the voiceover is
+        re-recorded only if its script changed.
+        """
+        report = safe_progress(progress)
+        instruction = " ".join(instruction.split())
+        if not instruction:
+            raise RevisionError("not_applied", "empty instruction")
+        if not self._uses_llm():
+            raise RevisionError(
+                "needs_ai", "revisions need the planner LLM (ADREEL_PLANNER=gemini)"
+            )
+        ctx = req.context
+        new_price = extract_price(instruction)  # "change the price to 400 birr"
+        if new_price is not None:
+            ctx = ctx.model_copy(update={"price": new_price})
+        elif ctx.price is None and current.slots.price is not None:
+            ctx = ctx.model_copy(update={"price": current.slots.price})
+        if ctx.brief and ctx.price is None:
+            ctx = ctx.model_copy(update={"price": extract_price(ctx.brief)})
+        p = self._prepare(
+            dataclasses.replace(req, context=ctx, template_id=current.template_id), report
+        )
+        p.base_fixes = carry_fixes(p.lines, current.captions)
+
+        t0 = time.monotonic()
+        report("plan", 0.25)
+        planner = self._get_planner()
+        if planner is None:  # pragma: no cover - guarded by _uses_llm
+            raise RevisionError("needs_ai", "no planner configured")
+        turn = PlannerTurn(
+            prompt=build_revision_prompt(
+                template=p.tpl,
+                brand=p.req.brand,
+                context=p.req.context,
+                clips=p.analyses,
+                lines=p.lines,
+                current=current,
+                instruction=instruction,
+                has_voiceover=p.req.voice is not None,
+                language=p.lang,
+            ),
+            media=[MediaInput(a.clip_id, a.proxy, "video/mp4", a.describe()) for a in p.analyses],
+            system=build_system(p.lang),
+            response_schema=PlannerOutput.model_json_schema(),
+        )
+        out: PlannerOutput | None = None
+        plan: EditPlan | None = None
+        try:
+            for attempt in range(1, self.s.plan_attempts + 1):
+                reply = planner.complete(turn)
+                u = reply.usage
+                p.costs.llm(
+                    planner.name,
+                    reply.model,
+                    input_tokens=u.input_tokens,
+                    input_audio_tokens=u.input_audio_tokens,
+                    output_tokens=u.output_tokens,
+                    detail=f"revise attempt {attempt}",
+                )
+                problems, out, plan = self._evaluate(reply.text, p.assemble, p.tpl, p.durations)
+                if not problems:
+                    break
+                log.warning("revise.invalid", attempt=attempt, problems=problems[:5])
+                turn.feedback.append((reply.text, format_problems(problems)))
+                out = plan = None
+        except ProviderError as exc:
+            raise RevisionError("not_applied", f"planner failed: {exc}") from exc
+        finally:
+            planner.close()
+        if out is None or plan is None:
+            raise RevisionError("not_applied", "planner output stayed invalid")
+        attempts = len(turn.feedback) + 1
+        p.timings["plan"] = time.monotonic() - t0
+        report("plan", 0.42)
+
+        t0 = time.monotonic()
+        if p.req.voice is not None:
+            new_script = (out.voiceover_script or "").strip()
+            old = current.voiceover
+            if old is not None and (not new_script or new_script == old.script.strip()):
+                # same script: keep the recording and its captions (both in output time)
+                vo_caps = [c for c in current.captions if c.timebase is Timebase.OUTPUT]
+                plan = plan.model_copy(update={"voiceover": old, "captions": vo_caps})
+            else:
+                plan = self._voiceover(
+                    p.req.voice, out, plan, p.tpl, p.lang, p.job, p.costs, p.warnings
+                )
+        plan = finalize_captions(plan, p.tpl.canvas.fps)
+        p.timings["voiceover"] = time.monotonic() - t0
+        report("voiceover", 0.5)
+        return self._finish(p, plan, planner.name, attempts, report, message=out.message)
+
+    def _prepare(self, req: AutoEditRequest, report: ProgressFn) -> _Prepared:
+        """Normalise, analyse and transcribe (all cached); resolve the template."""
+        ctx = req.context
         auto_template = req.template_id == AUTO_TEMPLATE
         # Both built-in templates share canvas/fps/loudness, so normalisation can start
         # before "auto" is resolved from the footage.
@@ -226,45 +427,33 @@ class AutoEditor:
             tpl = self.renderer.templates.get(choose_template(analyses, ctx))
             self._check_context(tpl, ctx)
             log.info("template.auto", template=tpl.id)
-        req = dataclasses.replace(req, context=ctx, template_id=tpl.id)
         cs = tpl.captions
-        lines = build_transcript_lines(transcripts, max_units=cs.max_units_per_line * cs.max_lines)
-        words_by_clip: dict[str, tuple[TranscriptWord, ...]] = {
-            k: v.spoken for k, v in transcripts.items()
-        }
-        durations = {a.clip_id: a.duration for a in analyses}
-
-        # 3. plan ------------------------------------------------------------------
-        t0 = time.monotonic()
-        report("plan", 0.25)
-        want_vo = req.voice is not None
-
-        def assemble(out: PlannerOutput) -> EditPlan:
-            return assemble_plan(
-                out,
-                template=tpl,
-                language=lang,
-                context=req.context,
-                lines=lines,
-                words_by_clip=words_by_clip,
-                clip_durations=durations,
-            )
-
-        out, plan, planner_used, attempts = self._plan(
-            req, tpl, lang, analyses, lines, want_vo, assemble, durations, costs, warnings
+        return _Prepared(
+            req=dataclasses.replace(req, context=ctx, template_id=tpl.id),
+            tpl=tpl,
+            lang=lang,
+            analyses=analyses,
+            lines=build_transcript_lines(
+                transcripts, max_units=cs.max_units_per_line * cs.max_lines
+            ),
+            words_by_clip={k: v.spoken for k, v in transcripts.items()},
+            durations={a.clip_id: a.duration for a in analyses},
+            job=job,
+            costs=costs,
+            warnings=warnings,
+            timings=timings,
         )
-        timings["plan"] = time.monotonic() - t0
-        report("plan", 0.42)
 
-        # 4. voiceover ------------------------------------------------------------
-        t0 = time.monotonic()
-        if req.voice is not None:
-            plan = self._voiceover(req.voice, out, plan, tpl, lang, job, costs, warnings)
-        plan = finalize_captions(plan, tpl.canvas.fps)
-        timings["voiceover"] = time.monotonic() - t0
-        report("voiceover", 0.5)
-
-        # 5. render -----------------------------------------------------------------
+    def _finish(
+        self,
+        p: _Prepared,
+        plan: EditPlan,
+        planner_used: str,
+        attempts: int,
+        report: ProgressFn,
+        message: str | None = None,
+    ) -> AutoEditResult:
+        req = p.req
         t0 = time.monotonic()
         plan_path = req.output.with_suffix(".plan.json")
         plan_path.parent.mkdir(parents=True, exist_ok=True)
@@ -280,21 +469,22 @@ class AutoEditor:
             ),
             lambda stage, frac: report(f"render:{stage}", 0.5 + 0.5 * frac),
         )
-        warnings += result.warnings
-        timings["render"] = time.monotonic() - t0
+        p.warnings += result.warnings
+        p.timings["render"] = time.monotonic() - t0
         if result.plan != plan:  # the renderer repaired something: keep the file in sync
             plan_path.write_text(
                 result.plan.model_dump_json(indent=2, exclude_none=True), encoding="utf-8"
             )
         cost_path = req.output.with_suffix(".cost.json")
-        costs.write(cost_path)
+        p.costs.write(cost_path)
+        timings = {k: round(v, 2) for k, v in p.timings.items()}
         _append_meta(
             cost_path,
             {
                 "planner": planner_used,
                 "attempts": attempts,
                 "video_seconds": round(result.duration, 2),
-                "timings_s": {k: round(v, 2) for k, v in timings.items()},
+                "timings_s": timings,
             },
         )
         log.info(
@@ -302,19 +492,20 @@ class AutoEditor:
             output=str(req.output),
             planner=planner_used,
             attempts=attempts,
-            cost_usd=round(costs.total_usd, 4),
+            cost_usd=round(p.costs.total_usd, 4),
             seconds=round(result.duration, 2),
         )
         return AutoEditResult(
             result.plan,
             result,
-            costs,
+            p.costs,
             plan_path,
             cost_path,
             planner_used,
             attempts,
-            warnings,
-            {k: round(v, 2) for k, v in timings.items()},
+            p.warnings,
+            timings,
+            message=message,
         )
 
     # ------------------------------------------------------------------ steps

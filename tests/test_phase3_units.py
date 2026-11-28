@@ -96,7 +96,7 @@ def test_preview_callbacks_roundtrip_and_fit_telegram_limit() -> None:
     kb = preview_keyboard(pid, "am")
     datas = [b["callback_data"] for row in kb["inline_keyboard"] for b in row]
     assert all(len(d.encode()) <= 64 for d in datas)
-    assert [parse_preview_callback(d).action for d in datas] == ["approve", "fix", "redo"]  # type: ignore[union-attr]
+    assert [parse_preview_callback(d).action for d in datas] == ["approve", "change", "fix", "redo"]  # type: ignore[union-attr]
     assert (
         parse_preview_callback("pv:x:" + str(pid)) is None
         and parse_preview_callback("pv:a:nope") is None
@@ -271,3 +271,18 @@ def test_rq_enqueue_sets_timeout_and_retries(monkeypatch: pytest.MonkeyPatch) ->
     job = Job.fetch(rq_id, connection=fake)  # type: ignore[arg-type]
     assert rq_id == "adreel-abc" and job.func_name == TASK_PATH and job.args == ("abc",)
     assert job.timeout == 600 and job.retries_left == 2 and job.retry_intervals == [30, 120]
+
+
+def test_migrations_match_models(tmp_path: Path) -> None:
+    """Every model change must ship with a migration (autogenerate finds no difference)."""
+    from alembic.autogenerate import compare_metadata
+    from alembic.migration import MigrationContext
+    from sqlalchemy import create_engine
+
+    from adreel.db.migrate import upgrade
+    from adreel.db.models import Base
+
+    url = f"sqlite:///{tmp_path / 'm.db'}"
+    upgrade(url)
+    with create_engine(url).connect() as conn:
+        assert compare_metadata(MigrationContext.configure(conn), Base.metadata) == []

@@ -286,6 +286,69 @@ def make(
 
 
 @app.command()
+def revise(
+    plan: PlanOpt,
+    brand: Annotated[Path, typer.Option("--brand", "-b", help="Brand kit JSON", exists=True)],
+    clip: ClipOpt,
+    prompt: Annotated[str, typer.Option("--prompt", help="What to change, in your own words")],
+    out: Annotated[Path, typer.Option("--out", "-o", help="Output .mp4")] = Path("revised.mp4"),
+    brief: Annotated[
+        str | None, typer.Option(help="The original brief (gives the AI context)")
+    ] = None,
+    voice: Annotated[
+        str | None, typer.Option(help="none | standard | premium (default: as in the plan)")
+    ] = None,
+    quality: Annotated[Quality, typer.Option("--quality", "-q")] = Quality.PREVIEW,
+    watermark: Annotated[bool, typer.Option("--watermark/--no-watermark")] = False,
+    work_dir: Annotated[Path | None, typer.Option(help="Cache/work directory")] = None,
+) -> None:
+    """Change an existing edit with a prompt (needs the Gemini planner). Writes OUT,
+    OUT.plan.json and OUT.cost.json."""
+    from adreel.ai.base import ProviderError
+    from adreel.autoedit.orchestrator import AutoEditError, AutoEditor, AutoEditRequest
+    from adreel.autoedit.schema import BusinessContext
+    from adreel.schemas.edit_plan import VoiceTier
+
+    current = _load_plan(plan)
+    s = get_settings().model_copy(update={"work_dir": work_dir} if work_dir else {})
+    if voice is None:
+        tier = current.voiceover.voice if current.voiceover else None
+    elif voice in ("standard", "premium"):
+        tier = VoiceTier(voice)
+    elif voice == "none":
+        tier = None
+    else:
+        raise typer.BadParameter("--voice must be none, standard or premium")
+    req = AutoEditRequest(
+        template_id=current.template_id,
+        brand=_load_brand(brand),
+        clips=_parse_clips(clip),
+        context=BusinessContext(brief=brief, price=current.slots.price),
+        output=out,
+        voice=tier,
+        quality=quality,
+        watermark=watermark,
+        language=current.language,
+    )
+    try:
+        with AutoEditor(settings=s, renderer=Renderer(settings=s)) as editor:
+            res = editor.revise(
+                req, current, prompt, lambda st, fr: _status(f"{st:<18} {int(fr * 100):3d}%")
+            )
+    except (AutoEditError, ProviderError, RenderError, FFmpegError, TemplateError) as exc:
+        _say(f"\nFailed: {exc}", color="red", err=True)
+        raise typer.Exit(1) from exc
+    _say("", err=True)
+    for w in res.warnings:
+        _say(f"warning: {w}", color="yellow", err=True)
+    r = res.render
+    _say(f"✓ {r.output}  {r.width}x{r.height}  {r.duration:.2f}s", color="green")
+    if res.message:
+        _say(f"  note from the AI: {res.message}")
+    _say(f"  plan: {res.plan_path}   cost: ${res.costs.total_usd:.4f} → {res.cost_path}")
+
+
+@app.command()
 def transcribe(
     media: Annotated[Path, typer.Argument(help="Audio or video file", exists=True)],
     language: Annotated[str, typer.Option("--language", "-l")] = "am",

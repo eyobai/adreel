@@ -44,6 +44,7 @@ def assemble_plan(
     clip_durations: Mapping[str, float],
     voiceover: Voiceover | None = None,
     voiceover_captions: Sequence[CaptionLine] | None = None,
+    base_fixes: Mapping[int, str] | None = None,
 ) -> EditPlan:
     planned = [s for s in out.segments if s.clip_id in clip_durations]
     refined = refine_segments(planned, words_by_clip, clip_durations)
@@ -70,7 +71,8 @@ def assemble_plan(
             }
         )
 
-    fixes = {f.id: f.text for f in out.caption_fixes}
+    # earlier fixes (e.g. made by the business) first; the planner's new fixes win
+    fixes = {**(base_fixes or {}), **{f.id: f.text for f in out.caption_fixes}}
     if voiceover_captions is not None:
         captions = list(voiceover_captions)  # the VO is what viewers hear: caption it
     else:

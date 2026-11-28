@@ -59,9 +59,11 @@ class Grade:
     @property
     def is_identity(self) -> bool:
         return (
-            abs(self.gamma - 1) < 0.01 and abs(self.contrast - 1) < 0.01
-            and abs(self.saturation - 1) < 0.01 and abs(self.warmth) < 0.005
-        )  # fmt: skip
+            abs(self.gamma - 1) < 0.01
+            and abs(self.contrast - 1) < 0.01
+            and abs(self.saturation - 1) < 0.01
+            and abs(self.warmth) < 0.005
+        )
 
     def filter(self) -> str:
         """ffmpeg filter chain ('' when nothing to do)."""
@@ -140,9 +142,19 @@ def measure(ff: FFmpeg, clip: Path, sample_fps: float = 2.0) -> ColorStats | Non
             pass
     with tempfile.TemporaryDirectory() as tmp:
         # relative stats file + cwd: no Windows drive letters inside a filter argument
-        ff.run(["-i", str(clip.resolve()), "-an", "-vf",
+        ff.run(
+            [
+                "-i",
+                str(clip.resolve()),
+                "-an",
+                "-vf",
                 f"fps={sample_fps},scale=160:-2,signalstats,metadata=print:file=stats.txt",
-                "-f", "null", "-"], cwd=Path(tmp))  # fmt: skip
+                "-f",
+                "null",
+                "-",
+            ],
+            cwd=Path(tmp),
+        )
         stats_file = Path(tmp) / "stats.txt"
         stats = parse_signalstats(stats_file.read_text()) if stats_file.is_file() else None
     if stats is not None:

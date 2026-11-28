@@ -12,8 +12,8 @@ from typing import Any, Literal
 
 from adreel.i18n import t
 
-PreviewAction = Literal["approve", "fix", "redo"]
-_ACTION_CODES: dict[str, PreviewAction] = {"a": "approve", "f": "fix", "r": "redo"}
+PreviewAction = Literal["approve", "fix", "redo", "change"]
+_ACTION_CODES: dict[str, PreviewAction] = {"a": "approve", "f": "fix", "r": "redo", "c": "change"}
 
 
 def inline_keyboard(rows: list[list[tuple[str, str]]]) -> dict[str, Any]:
@@ -29,6 +29,7 @@ def preview_keyboard(project_id: uuid.UUID | str, lang: str) -> dict[str, Any]:
     return inline_keyboard(
         [
             [(t("btn_approve", lang), f"pv:a:{pid}")],
+            [(t("btn_change", lang), f"pv:c:{pid}")],
             [(t("btn_fix", lang), f"pv:f:{pid}"), (t("btn_redo", lang), f"pv:r:{pid}")],
         ]
     )

@@ -63,6 +63,7 @@ docker run --rm -v "$PWD/examples:/work" -w /work adreel render -p plan_product_
 | Command | What it does |
 |---|---|
 | `adreel make -b BRAND -c ID=FILE… --brief "what you want" [-t auto\|product_promo\|talking_head] [--product --price --old-price --highlight --target --cta --notes] [--voice none\|standard\|premium] [-q] [--watermark] [--fake]` | Fully automatic: transcribe → plan → voiceover → colour → render, plus the plan and cost files |
+| `adreel revise -p PLAN -b BRAND -c ID=FILE… --prompt "what to change" [--brief] [--voice] [-o]` | Change an existing edit with a prompt (needs Gemini) |
 | `adreel transcribe FILE [-l am] [-o JSON] [--fake]` | Word-level transcript, printed as caption lines |
 | `adreel bot` | Run the Telegram bot (long polling) |
 | `adreel worker [--burst]` | Run an RQ render worker |
@@ -113,9 +114,12 @@ start it with `docker compose --profile local-api up`.
         → "tell us what you want" (one free-text message; include the price for a promo)
         → voice
         → "⏳ Checking your clips… 35% ▓▓▓░░░░░░░" (one message, edited as the job runs)
-        → preview video  [✅ Approve] [✏️ Fix captions] [🔁 Redo]
+        → preview video  [✅ Approve] [💬 Change something] [✏️ Fix captions] [🔁 Redo]
+Change  → "what should we change?" e.g. "show the price first, make it shorter, warmer colours"
+        → the AI revises the current edit (only what was asked) → new preview, with a note if
+          something couldn't be done
 Fix     → numbered captions; reply "3: corrected text" (several lines at once) → re-render, no AI
-Redo    → a fresh AI edit (2 free per video)
+Redo    → a fresh AI edit (Redo and Change share 2 free re-edits per video)
 Approve → full-quality MP4 sent as a document (no Telegram recompression)
 /brand  /lang  /help  /cancel
 ```
@@ -263,6 +267,19 @@ Design decisions:
   captions. ElevenLabs returns character timestamps, so its captions are exact; Azure's
   REST API returns audio only, so word timings are estimated from the audio's pauses
   (accurate per line, approximate per word).
+- **Changing an edit with a prompt** (`AutoEditor.revise`, the 💬 button, `adreel revise`):
+  - **What Gemini gets:** the request, the *current* edit (cuts, text, look, voiceover
+    script), the clips and the transcript. It returns the complete revised edit, told to
+    change only what was asked.
+  - **What is kept:** caption fixes the business already made (`carry_fixes`).
+    Transcripts come from the cache, so speech recognition is never paid for twice.
+  - **Voiceover:** re-recorded only if its script changed.
+  - **A new price** is read by code from the request ("ዋጋውን ወደ 400 ብር ቀይር"), never set
+    by the model.
+  - **Feedback:** the model can return a short `message` when part of a request isn't
+    possible ("not enough footage to make it longer"); the bot shows it with the preview.
+  - **Failures:** an invalid answer or a provider outage ends with a clear message, and
+    the previous preview stays usable.
 - **Cost log per run** (`out.cost.json`):
   - billable units for every call: speech-recognition seconds, Gemini input/audio/output
     tokens (thinking included), TTS characters
@@ -370,7 +387,7 @@ All settings are environment variables prefixed `ADREEL_` (or a `.env` file); se
 ## Development
 
 ```bash
-pytest                 # 189 tests, no network; the ffmpeg integration tests skip without ffmpeg
+pytest                 # 197 tests, no network; the ffmpeg integration tests skip without ffmpeg
 ruff check src tests && ruff format --check src tests
 mypy src               # strict
 adreel schema -o docs/edit_plan.schema.json   # after changing the schema (a test checks it)
@@ -412,6 +429,12 @@ Test coverage:
   - every message present in both languages with matching placeholders
   - the Bot API client: 429 retry, local-mode files
   - storage path safety, database URLs, the inline queue, RQ enqueue options
+- `test_revise.py`: changing an edit with a prompt.
+  - Only what was asked changes; caption fixes and the voiceover recording are kept.
+  - A new price comes from the business's words.
+  - Failures are covered: no AI configured, invalid answers, a provider outage.
+  - The worker's `revise` job runs on a fresh worker that pulls clips from storage, and
+    the note shows in the preview caption.
 - `test_autoedit_integration.py`: real ffmpeg runs with a scripted planner. It returns
   broken JSON, then a too-short plan, then a valid one (three attempts, three cost entries,
   then a render). Also: a provider outage falls back to the heuristic, transcripts are
