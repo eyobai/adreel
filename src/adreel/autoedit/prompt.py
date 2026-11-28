@@ -60,6 +60,16 @@ afterwards, so choose whole thoughts.
 translate or rewrite style. Omit lines that are fine.
 - reframe_mode: "auto" unless you have a reason; use focus_x to point at the subject when \
 it is off-centre in a landscape shot.
+
+You write ALL the on-screen text yourself; the business only told you what they want:
+- slots.hook_text: a scroll-stopping opening line (max 5 words) that fits the brief.
+- slots.product_name: the product as the business calls it (from the brief or speech).
+- slots.cta_text: a short call to action (e.g. order, visit, call).
+- on_screen_text: 1-3 short labels or emphasis lines on the key moments (benefits, offer, \
+what makes it special), anchored to the segment where that thing is visible or said.
+- look: the colour style that suits the business and brief (vivid for food and products, \
+warm for cafés and cosy places, cool for tech or fitness, natural otherwise). Exposure and \
+white balance are corrected automatically; look only sets the mood.
 """
 
 
@@ -87,6 +97,10 @@ def build_prompt(
     end_card = template.end_card.duration_s if template.end_card.enabled else 0.0
     lo, hi = template.duration.min_s - end_card, template.duration.max_s - end_card
     out: list[str] = []
+    if context.brief:
+        out.append("## What the business wants (their own words: follow it closely)")
+        out.append(context.brief)
+        out.append("")
     out.append("## Business")
     out.append(f"- Name: {brand.business_name} ({brand.business_type.value})")
     for label, value in [

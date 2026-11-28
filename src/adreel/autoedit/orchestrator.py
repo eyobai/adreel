@@ -10,6 +10,7 @@ content + provider + model, so re-planning or re-rendering never pays for ASR tw
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import time
@@ -40,6 +41,7 @@ from adreel.analysis import (
     speech_stats,
 )
 from adreel.autoedit.assemble import assemble_plan
+from adreel.autoedit.brief import AUTO_TEMPLATE, LOOK_BY_BUSINESS, extract_price
 from adreel.autoedit.heuristic import heuristic_plan
 from adreel.autoedit.prompt import ClipAnalysis, build_prompt, build_system, format_problems
 from adreel.autoedit.schema import BusinessContext, PlannerOutput
@@ -69,6 +71,18 @@ log = get_logger(__name__)
 
 ProgressFn = Callable[[str, float], None]
 VO_START_S = 0.3
+TALKING_SPEECH_SHARE = 0.4
+
+
+def choose_template(analyses: list[ClipAnalysis], ctx: BusinessContext) -> str:
+    """Mostly someone talking -> talking_head; otherwise a product promo (needs a price)."""
+    footage = sum(a.duration for a in analyses) or 1.0
+    speech = sum(
+        sum(w.end - w.start for w in a.transcript.spoken) for a in analyses if a.transcript
+    )
+    if speech / footage >= TALKING_SPEECH_SHARE or ctx.price is None:
+        return "talking_head"
+    return "product_promo"
 
 
 class AutoEditError(RuntimeError):
@@ -131,9 +145,17 @@ class AutoEditor:
 
     def run(self, req: AutoEditRequest, progress: ProgressFn | None = None) -> AutoEditResult:
         report = safe_progress(progress)
-        tpl = self.renderer.templates.get(req.template_id)
+        # Facts in the free-text brief (the price) are read by code, never by the LLM.
+        ctx = req.context
+        if ctx.brief and ctx.price is None:
+            ctx = ctx.model_copy(update={"price": extract_price(ctx.brief)})
+        auto_template = req.template_id == AUTO_TEMPLATE
+        # Both built-in templates share canvas/fps/loudness, so normalisation can start
+        # before "auto" is resolved from the footage.
+        tpl = self.renderer.templates.get("product_promo" if auto_template else req.template_id)
         lang = req.language or req.brand.language
-        self._check_context(tpl, req.context)
+        if not auto_template:
+            self._check_context(tpl, ctx)
         costs = CostLog(self.s.prices)
         warnings: list[str] = []
         timings: dict[str, float] = {}
@@ -200,6 +222,11 @@ class AutoEditor:
             for a in analyses
         ]
         timings["transcribe"] = time.monotonic() - t0
+        if auto_template:
+            tpl = self.renderer.templates.get(choose_template(analyses, ctx))
+            self._check_context(tpl, ctx)
+            log.info("template.auto", template=tpl.id)
+        req = dataclasses.replace(req, context=ctx, template_id=tpl.id)
         cs = tpl.captions
         lines = build_transcript_lines(transcripts, max_units=cs.max_units_per_line * cs.max_lines)
         words_by_clip: dict[str, tuple[TranscriptWord, ...]] = {
@@ -294,14 +321,13 @@ class AutoEditor:
 
     @staticmethod
     def _check_context(tpl: TemplateSpec, ctx: BusinessContext) -> None:
-        # Facts the LLM must never invent have to come from the business.
-        missing = [
-            s
-            for s in tpl.required_slots
-            if s in ("product_name", "price") and getattr(ctx, s) in (None, "")
-        ]
-        if missing:
-            raise AutoEditError(f"template {tpl.id} needs: {', '.join(missing)}")
+        # A price is a fact the LLM must never invent: it comes from the business
+        # (an answer, or a number they wrote in the brief).
+        if "price" in tpl.required_slots and ctx.price is None:
+            raise AutoEditError(
+                f"template {tpl.id} needs a price: "
+                "add it to the brief (e.g. '500 ብር') or use --price"
+            )
 
     def _uses_llm(self) -> bool:
         return self._planner_cfg not in (None, "heuristic") and not (
@@ -391,7 +417,14 @@ class AutoEditor:
                 log.error("plan.provider_error", error=str(exc))
             finally:
                 planner.close()
-        out = heuristic_plan(tpl, req.context, analyses, want_voiceover=want_vo, language=lang)
+        out = heuristic_plan(
+            tpl,
+            req.context,
+            analyses,
+            want_voiceover=want_vo,
+            language=lang,
+            look=LOOK_BY_BUSINESS.get(req.brand.business_type.value, "natural"),
+        )
         plan = assemble(out)
         attempts = len(turn.feedback) if planner is not None else 0
         return out, plan, "heuristic", attempts

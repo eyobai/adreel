@@ -29,15 +29,22 @@ adreel render -p plan_talking_head.json -b brand_kit.json \
   -o talk_preview.mp4 -q preview --watermark --voiceover media/vo_test.wav
 ```
 
-Automatic editing (Phase 2). `--fake` runs the whole pipeline without API keys, using fake
-transcription and TTS plus the heuristic planner; drop it once your keys are in `.env`:
+**Automatic editing: just say what you want.** The brief is in your own words, Amharic or
+English. The system then:
+- picks the template from the footage
+- takes the price from your words
+- writes all the on-screen Amharic text, the hook and the call to action (Gemini)
+- cuts the video and corrects the colour
+
+`--fake` runs it without API keys, using fake transcription and TTS plus the heuristic
+planner; drop it once your keys are in `.env`.
 
 ```bash
 cd examples
-adreel make -t product_promo -b brand_kit.json \
+adreel make -b brand_kit.json \
   -c c1=media/c1_portrait_60fps.mp4 -c c2=media/c2_landscape_noaudio.mp4 \
   -c c3=media/c3_landscape_25fps.mp4 \
-  --product "ይርጋጨፌ ቡና" --price 1200 --old-price 1500 --highlight "ትኩስ የተቆላ ቡና" \
+  --brief "የይርጋጨፌ ቡና ማስታወቂያ ነው፤ ዋጋው 1200 ብር፤ ወጣቶችን እንዲማርክ ፈጣንና ደማቅ አድርጉት" \
   --voice standard -o out/promo.mp4 --fake
 # -> out/promo.mp4, out/promo.plan.json (edit and re-render with `adreel render`), out/promo.cost.json
 ```
@@ -55,7 +62,7 @@ docker run --rm -v "$PWD/examples:/work" -w /work adreel render -p plan_product_
 
 | Command | What it does |
 |---|---|
-| `adreel make -t TEMPLATE -b BRAND -c ID=FILE… [--product --price --old-price --highlight --target --cta --notes] [--voice none\|standard\|premium] [-q] [--watermark] [--fake]` | Fully automatic: transcribe → plan → voiceover → render, plus the plan and cost files |
+| `adreel make -b BRAND -c ID=FILE… --brief "what you want" [-t auto\|product_promo\|talking_head] [--product --price --old-price --highlight --target --cta --notes] [--voice none\|standard\|premium] [-q] [--watermark] [--fake]` | Fully automatic: transcribe → plan → voiceover → colour → render, plus the plan and cost files |
 | `adreel transcribe FILE [-l am] [-o JSON] [--fake]` | Word-level transcript, printed as caption lines |
 | `adreel bot` | Run the Telegram bot (long polling) |
 | `adreel worker [--burst]` | Run an RQ render worker |
@@ -102,7 +109,9 @@ start it with `docker compose --profile local-api up`.
 
 ```
 /start  → language → business name → type → logo (or skip) → colour → phone → Telegram handle
-/new    → template → send 1–5 clips (Done) → product, price (promo) → what to highlight → voice
+/new    → template (or 🤖 let the AI choose) → send 1–5 clips (Done)
+        → "tell us what you want" (one free-text message; include the price for a promo)
+        → voice
         → "⏳ Checking your clips… 35% ▓▓▓░░░░░░░" (one message, edited as the job runs)
         → preview video  [✅ Approve] [✏️ Fix captions] [🔁 Redo]
 Fix     → numbered captions; reply "3: corrected text" (several lines at once) → re-render, no AI
@@ -228,9 +237,15 @@ Design decisions:
   word boundaries; pauses over 0.35 s and Amharic hesitation sounds (`እ…`, `ኧ`, `እም`…) are cut
   out. Other segments that keep their sound snap to the nearest word edge, so a cut never
   lands mid-word.
-- **Facts come from the business, not the model.** Price, old price and product name always
-  come from the answers (`BusinessContext`). Templates that need them refuse to start before
-  any money is spent.
+- **Facts come from the business, not the model.** The price comes only from the
+  business: an answer, or a number they wrote next to ብር/birr/ETB or "ዋጋ"/"price" in the
+  brief. Code extracts it (`autoedit/brief.py`); the LLM never does. A template that needs
+  a price refuses to start before any money is spent. The product name and all creative
+  text are the LLM's job.
+- **The brief drives everything.** `BusinessContext.brief`, the business's own words,
+  leads the prompt. Gemini writes the hook, the product name, the call to action, 1–3
+  on-screen labels, and picks the colour look. `-t auto` chooses talking head vs product
+  promo from how much of the footage is speech.
 - **Validation with feedback.** Planner output goes through Pydantic, assembly,
   `repair_plan` and `check_plan`. Remaining errors are sent back in the same conversation
   ("Your JSON had these problems: …"), up to `ADREEL_PLAN_ATTEMPTS`. If every attempt fails,
@@ -303,6 +318,16 @@ clips ─▶ normalise (cached) ─▶ check/repair plan ─▶ cut + reframe ea
   path is median-filtered and smoothed with a centred moving average (no lag). A still
   subject gets a static crop. A moving one gets its path simplified (Ramer–Douglas–Peucker)
   into a piecewise-linear ffmpeg `crop` expression, so there is no extra decode pass.
+- **Colour.** Each clip is measured once with ffmpeg `signalstats`, and the result is
+  cached. The correction is mild:
+  - dark clips are lifted with gamma, and over-bright ones calmed
+  - flat footage gets contrast, but only when the brightened image sits near mid-grey,
+    where ffmpeg's `eq` contrast pivots
+  - dull colour gets saturation, and garish colour slightly less
+
+  The planner then picks a look: `natural`, `vivid` (food and products), `warm` (cafés) or
+  `cool`. Without Gemini, the look comes from the brand's business type. `look: none` in a
+  plan turns grading off. Every value is clamped, so a bad measurement can't wreck a clip.
 - **Text** is all ASS, rendered by libass with HarfBuzz shaping (captions, hook, label,
   price card, end card, watermark). PlayRes is the 1080×1920 canvas, so preview and final
   have identical layout. **Ethiopic gotcha:** Noto Sans Ethiopic has no Latin letters, ASCII
@@ -345,7 +370,7 @@ All settings are environment variables prefixed `ADREEL_` (or a `.env` file); se
 ## Development
 
 ```bash
-pytest                 # 172 tests, no network; the ffmpeg integration tests skip without ffmpeg
+pytest                 # 189 tests, no network; the ffmpeg integration tests skip without ffmpeg
 ruff check src tests && ruff format --check src tests
 mypy src               # strict
 adreel schema -o docs/edit_plan.schema.json   # after changing the schema (a test checks it)

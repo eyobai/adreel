@@ -277,12 +277,10 @@ async def test_product_promo_flow_enqueues_job(h: Harness) -> None:
     await h.send_video()
     assert h.tg.last_text() == t("clip_received", "am", n=2, max=5)
     await h.tap("clips:done")
-    assert h.tg.last_text() == t("ask_product", "am")
-    await h.send("ይርጋጨፌ ቡና")
-    await h.send("ብዙ")
-    assert h.tg.last_text() == t("bad_price", "am")
-    await h.send("1,200 ብር")
-    await h.tap("skip")
+    assert h.tg.last_text() == t("ask_brief", "am")
+    await h.send("ይርጋጨፌ ቡና ማስታወቂያ፣ ፈጣን አድርጉት")
+    assert h.tg.last_text() == t("brief_need_price", "am")  # promo needs a price
+    await h.send("ይርጋጨፌ ቡና ማስታወቂያ፣ ዋጋው 1,200 ብር፣ ፈጣን አድርጉት")
     assert h.tg.last_text() == t("ask_voice", "am")
     await h.tap("voice:standard")
     assert h.tg.last_text() == t("queued", "am")
@@ -293,7 +291,7 @@ async def test_product_promo_flow_enqueues_job(h: Harness) -> None:
         clips = (await db.scalars(select(Clip).order_by(Clip.idx))).all()
         assert project and job
         assert project.status == ProjectStatus.QUEUED and project.voice == "standard"
-        assert project.context == {"product_name": "ይርጋጨፌ ቡና", "price": 1200.0, "highlight": None}
+        assert project.context == {"brief": "ይርጋጨፌ ቡና ማስታወቂያ፣ ዋጋው 1,200 ብር፣ ፈጣን አድርጉት"}
         assert project.status_message_id is not None and project.chat_id == CHAT
         assert (
             job.kind == JobKind.AUTO_EDIT
@@ -313,7 +311,25 @@ async def test_max_clips_moves_on_and_talking_head_skips_price(h: Harness) -> No
     for _ in range(5):
         await h.send_video()
     assert h.tg.texts()[-2] == t("max_clips", "am", max=5)
-    assert h.tg.last_text() == t("ask_highlight", "am")
+    assert h.tg.last_text() == t("ask_brief", "am")
+
+
+@pytest.mark.asyncio
+async def test_let_ai_choose_template_and_skip_brief(h: Harness) -> None:
+    await _onboard(h)
+    await h.send("/new")
+    kb = next(m for m in reversed(h.tg.requests) if isinstance(m, SendMessage)).reply_markup
+    assert kb.inline_keyboard[0][0].callback_data == "tpl:auto"  # type: ignore[union-attr]
+    await h.tap("tpl:auto")
+    await h.send_video()
+    await h.tap("clips:done")
+    await h.tap("skip")  # no brief: the AI decides from the footage alone
+    assert h.tg.last_text() == t("ask_voice", "am")
+    await h.tap("voice:none")
+    async with await h.db() as db:
+        project = await db.scalar(select(Project))
+        assert project and project.template_id == "auto" and project.context == {}
+        assert project.status == ProjectStatus.QUEUED
 
 
 @pytest.mark.asyncio

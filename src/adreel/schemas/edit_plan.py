@@ -204,6 +204,9 @@ class EditPlan(_Strict):
     slots: TemplateSlots = TemplateSlots()
     price_card: PriceCard = PriceCard(enabled=False)
     voiceover: Voiceover | None = None
+    look: Literal["natural", "vivid", "warm", "cool", "none"] = Field(
+        "natural", description="Colour look applied on top of automatic correction"
+    )
 
     @model_validator(mode="after")
     def _check_refs(self) -> Self:

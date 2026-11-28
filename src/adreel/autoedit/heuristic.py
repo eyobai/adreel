@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+from adreel.autoedit.brief import first_phrase
 from adreel.autoedit.prompt import ClipAnalysis
 from adreel.autoedit.schema import BusinessContext, PlannedSegment, PlannerOutput
 from adreel.render.overlays import format_number
@@ -29,6 +30,7 @@ def heuristic_plan(
     *,
     want_voiceover: bool,
     language: str,
+    look: str = "natural",
 ) -> PlannerOutput:
     roles = {st.role for st in template.structure}
     if SegmentRole.SPEAKER in roles:
@@ -39,7 +41,10 @@ def heuristic_plan(
         segs = _promo(clips, target)
     products = [s for s in segs if s.role is SegmentRole.PRODUCT]
     slots = TemplateSlots(
-        hook_text=(context.highlight or context.product_name or "")[:60] or None,
+        hook_text=(context.highlight or first_phrase(context.brief) or context.product_name or "")[
+            :60
+        ]
+        or None,
         product_name=context.product_name,
         price=context.price,
         old_price=context.old_price if context.price is not None else None,
@@ -51,6 +56,7 @@ def heuristic_plan(
         slots=slots,
         price_card_segment_id=(products[-1].id if products else None),
         voiceover_script=default_voiceover(context, language) if want_voiceover else None,
+        look=look if look in ("natural", "vivid", "warm", "cool") else "natural",
     )
 
 

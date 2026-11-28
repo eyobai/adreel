@@ -80,6 +80,7 @@ TEXTS: dict[str, dict[str, str]] = {
     "yes": {"am": "አለ", "en": "yes"},
     # ---------------------------------------------------------------- /new
     "choose_template": {"am": "ምን አይነት ቪዲዮ እንስራ?", "en": "What kind of video shall we make?"},
+    "tpl_auto": {"am": "🤖 AI ይምረጥልኝ", "en": "🤖 Let the AI choose"},
     "tpl_product_promo": {
         "am": "🛍 የምርት ማስታወቂያ (ከዋጋ ጋር፣ 20–30 ሰከንድ)",
         "en": "🛍 Product promo (with price, 20–30 s)",
@@ -111,19 +112,14 @@ TEXTS: dict[str, dict[str, str]] = {
         "am": "ያልተጠናቀቀ ቪዲዮ አለዎት ({n} ቪዲዮዎች ደርሰዋል)። እንቀጥል?",
         "en": "You have an unfinished video ({n} clips received). Continue where you left off?",
     },
-    "ask_product": {"am": "የምርቱ ስም ማን ነው?", "en": "What's the product called?"},
-    "bad_product": {"am": "ስሙ ከ1 እስከ 40 ፊደል መሆን አለበት።", "en": "The name must be 1–40 characters."},
-    "ask_price": {
-        "am": "ዋጋው ስንት ነው? (በብር፣ ለምሳሌ 1200)",
-        "en": "What's the price in birr? (e.g. 1200)",
+    "ask_brief": {
+        "am": "💬 ምን አይነት ቪዲዮ እንደሚፈልጉ በራስዎ ቃላት ይንገሩን።\nለምሳሌ፦ «አዲሱ ቡናችን ማስታወቂያ ነው፤ ዋጋው 450 ብር፤ ወጣቶችን እንዲማርክ ፈጣንና ደማቅ አድርጉት»\n\nጽሑፉን፣ ቁርጦቹንና ቀለሙን እኛ እንወስናለን።",
+        "en": '💬 Tell us in your own words what you want.\nFor example: "Ad for our new coffee, 450 birr, make it fast and bright for young people"\n\nWe\'ll decide the text, the cuts and the colours.',
     },
-    "bad_price": {
-        "am": "ዋጋውን በቁጥር ይጻፉ፣ ለምሳሌ 1200።",
-        "en": "Please type the price as a number, e.g. 1200.",
-    },
-    "ask_highlight": {
-        "am": "በቪዲዮው ምን እንዲጎላ ይፈልጋሉ? (ለምሳሌ «ትኩስ የተቆላ ቡና»)፣ ወይም «ዝለል» ይጫኑ።",
-        "en": 'What should the video highlight? (e.g. "freshly roasted coffee"), or tap Skip.',
+    "bad_brief": {"am": "እባክዎ ከ1000 ፊደል ባነሰ ይጻፉ።", "en": "Please keep it under 1000 characters."},
+    "brief_need_price": {
+        "am": "ለምርት ማስታወቂያ ዋጋ ያስፈልጋል። እባክዎ ዋጋውን ጨምረው ይጻፉ (ለምሳሌ «450 ብር»)።",
+        "en": 'A product promo needs a price. Please write it again including the price (e.g. "450 birr").',
     },
     "ask_voice": {"am": "የድምፅ ትረካ (voiceover) ይፈልጋሉ?", "en": "Would you like an AI voiceover?"},
     "voice_none": {"am": "ያለ ትረካ", "en": "No voiceover"},

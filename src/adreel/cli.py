@@ -175,9 +175,17 @@ def render(
 
 @app.command()
 def make(
-    template: Annotated[str, typer.Option("--template", "-t", help="product_promo | talking_head")],
     brand: Annotated[Path, typer.Option("--brand", "-b", help="Brand kit JSON", exists=True)],
     clip: ClipOpt,
+    brief: Annotated[
+        str | None,
+        typer.Option(
+            "--brief", "-p", help="Tell it what you want, in your own words (Amharic or English)"
+        ),
+    ] = None,
+    template: Annotated[
+        str, typer.Option("--template", "-t", help="auto | product_promo | talking_head")
+    ] = "auto",
     out: Annotated[Path, typer.Option("--out", "-o", help="Output .mp4")] = Path("out.mp4"),
     product: Annotated[str | None, typer.Option(help="Product name")] = None,
     price: Annotated[float | None, typer.Option(help="Price in ETB")] = None,
@@ -228,6 +236,7 @@ def make(
             target_customer=target,
             cta=cta,
             notes=notes,
+            brief=brief,
         )
     except ValidationError as exc:
         raise typer.BadParameter(str(exc)) from exc

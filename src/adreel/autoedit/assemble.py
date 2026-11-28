@@ -92,5 +92,6 @@ def assemble_plan(
             "slots": slots,
             "price_card": PriceCard(enabled=price_ok, segment_id=pc_seg).model_dump(mode="json"),
             "voiceover": voiceover.model_dump(mode="json") if voiceover else None,
+            "look": out.look,
         }
     )

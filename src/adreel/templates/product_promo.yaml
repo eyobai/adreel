@@ -12,7 +12,7 @@ structure:
   - {role: product, required: true, min_s: 1.2, max_s: 6, repeat: true}
   - {role: cta, required: false, min_s: 1.5, max_s: 5}
 
-required_slots: [product_name, price]
+required_slots: [price]   # product name and all text can come from the brief
 
 captions:
   font_size: 86

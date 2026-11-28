@@ -23,6 +23,7 @@ from aiogram.types import CallbackQuery, Document, Message, Video, VideoNote
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from adreel.autoedit.brief import AUTO_TEMPLATE, extract_price
 from adreel.bot import keyboards as kb
 from adreel.bot.parsing import (
     clean_text,
@@ -30,7 +31,6 @@ from adreel.bot.parsing import (
     parse_handle,
     parse_hex_color,
     parse_phone,
-    parse_price,
 )
 from adreel.bot.services import (
     add_clip,
@@ -347,7 +347,9 @@ async def cmd_new(
         )
         return
     await state.set_state(NewVideo.template)
-    await message.answer(t("choose_template", lang), reply_markup=kb.template_kb(lang, templates))
+    await message.answer(
+        t("choose_template", lang), reply_markup=kb.template_kb(lang, [AUTO_TEMPLATE, *templates])
+    )
 
 
 @router.callback_query(F.data.in_({"new:resume", "new:restart"}))
@@ -377,7 +379,7 @@ async def on_resume(
         draft.status = ProjectStatus.CANCELLED
     await state.set_state(NewVideo.template)
     await _reply(cb).answer(
-        t("choose_template", lang), reply_markup=kb.template_kb(lang, templates)
+        t("choose_template", lang), reply_markup=kb.template_kb(lang, [AUTO_TEMPLATE, *templates])
     )
 
 
@@ -393,7 +395,7 @@ async def on_template(
 ) -> None:
     template_id = (cb.data or "").split(":", 1)[1]
     await cb.answer()
-    if template_id not in templates or user.brand_kit is None:
+    if template_id not in (AUTO_TEMPLATE, *templates) or user.brand_kit is None:
         return
     project = await create_project(
         db, user, template_id, chat_id=cb.message.chat.id if cb.message else user.telegram_id
@@ -482,12 +484,10 @@ async def on_clips_done(
 
 
 async def _ask_questions(target: Message, state: FSMContext, project: Project, lang: str) -> None:
-    if project.template_id == "product_promo":
-        await state.set_state(NewVideo.product)
-        await target.answer(t("ask_product", lang))
-    else:
-        await state.set_state(NewVideo.highlight)
-        await target.answer(t("ask_highlight", lang), reply_markup=kb.skip_kb(lang))
+    """One open question: the business says what they want; the AI decides the rest."""
+    await state.set_state(NewVideo.brief)
+    kb_ = None if project.template_id == "product_promo" else kb.skip_kb(lang)
+    await target.answer(t("ask_brief", lang), reply_markup=kb_)
 
 
 async def _set_context(
@@ -504,38 +504,28 @@ async def _set_context(
     return project
 
 
-@router.message(NewVideo.product, F.text)
-async def on_product(
+@router.message(NewVideo.brief, F.text)
+async def on_brief(
     message: Message, state: FSMContext, db: AsyncSession, user: User, lang: str
 ) -> None:
-    name = clean_text(message.text, 40)
-    if name is None:
-        await message.answer(t("bad_product", lang))
+    brief = clean_text(message.text, 1000)
+    if brief is None:
+        await message.answer(t("bad_brief", lang))
         return
-    await _set_context(db, user, state, product_name=name)
-    await state.set_state(NewVideo.price)
-    await message.answer(t("ask_price", lang))
-
-
-@router.message(NewVideo.price, F.text)
-async def on_price(
-    message: Message, state: FSMContext, db: AsyncSession, user: User, lang: str
-) -> None:
-    price = parse_price(message.text or "")
-    if price is None:
-        await message.answer(t("bad_price", lang))
+    data = await state.get_data()
+    project = (
+        await get_project(db, data.get("project_id", ""), user.id)
+        if data.get("project_id")
+        else None
+    )
+    if project is None:
+        await state.clear()
         return
-    await _set_context(db, user, state, price=price)
-    await state.set_state(NewVideo.highlight)
-    await message.answer(t("ask_highlight", lang), reply_markup=kb.skip_kb(lang))
-
-
-@router.message(NewVideo.highlight, F.text)
-async def on_highlight(
-    message: Message, state: FSMContext, db: AsyncSession, user: User, lang: str
-) -> None:
-    value = None if is_skip(message.text) else clean_text(message.text, 200)
-    await _set_context(db, user, state, highlight=value)
+    # A product promo shows a price card; the price must come from the business.
+    if project.template_id == "product_promo" and extract_price(brief) is None:
+        await message.answer(t("brief_need_price", lang))
+        return
+    await _set_context(db, user, state, brief=brief)
     await state.set_state(NewVideo.voice)
     await message.answer(t("ask_voice", lang), reply_markup=kb.voice_kb(lang))
 
@@ -553,8 +543,7 @@ async def on_skip(
         await _brand_value(target, state, db, user, lang, "phone", None)
     elif current == BrandForm.handle.state:
         await _brand_value(target, state, db, user, lang, "handle", None)
-    elif current == NewVideo.highlight.state:
-        await _set_context(db, user, state, highlight=None)
+    elif current == NewVideo.brief.state:  # let the AI decide from the footage alone
         await state.set_state(NewVideo.voice)
         await target.answer(t("ask_voice", lang), reply_markup=kb.voice_kb(lang))
 

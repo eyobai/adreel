@@ -16,9 +16,7 @@ class BrandForm(StatesGroup):
 class NewVideo(StatesGroup):
     template = State()
     clips = State()
-    product = State()
-    price = State()
-    highlight = State()
+    brief = State()
     voice = State()
 
 
