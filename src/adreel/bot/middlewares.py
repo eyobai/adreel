@@ -46,6 +46,7 @@ class UserMiddleware(BaseMiddleware):
             first_name=tg_user.first_name,
             username=tg_user.username,
             language_code=tg_user.language_code,
+            signup_bonus=data["settings"].signup_bonus_credits,
         )
         if user.is_blocked:
             return None

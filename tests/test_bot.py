@@ -12,7 +12,7 @@ import pytest
 import pytest_asyncio
 from aiogram import Bot, Dispatcher
 from aiogram.client.session.base import BaseSession
-from aiogram.methods import AnswerCallbackQuery, GetFile, SendMessage, TelegramMethod
+from aiogram.methods import AnswerCallbackQuery, GetFile, GetMe, SendMessage, TelegramMethod
 from aiogram.types import CallbackQuery, Chat, File, Message, Update, Video
 from aiogram.types import User as TgUser
 from sqlalchemy import select
@@ -56,7 +56,9 @@ class MockSession(BaseSession):
                 date=datetime.now(UTC),
                 chat=Chat(id=int(method.chat_id), type="private"),
                 text=method.text,
-            )
+            ).as_(bot)  # real responses are bound to the bot (status.edit_text works)
+        if isinstance(method, GetMe):
+            return TgUser(id=1, is_bot=True, first_name="AdReel", username="adreel_bot")
         if isinstance(method, GetFile):
             return File(
                 file_id=method.file_id,

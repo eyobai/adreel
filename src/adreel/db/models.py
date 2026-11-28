@@ -191,3 +191,61 @@ class ApiCost(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     job: Mapped[Job] = relationship(back_populates="costs")
+
+
+class LedgerKind(StrEnum):
+    SIGNUP_BONUS = "signup_bonus"
+    PURCHASE = "purchase"
+    CHARGE = "charge"
+    REFUND = "refund"
+    ADMIN = "admin"
+
+
+class CreditLedger(Base):
+    """Append-only credit movements. The balance is SUM(delta); rows are never edited.
+
+    ``idempotency_key`` is unique: a webhook delivered twice, a retried job or a double tap
+    can never apply the same movement twice (signup:<user>, payment:<tx_ref>,
+    charge:<job>, refund:<job>, admin:<uuid>).
+    """
+
+    __tablename__ = "credit_ledger"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    delta: Mapped[int] = mapped_column(Integer)
+    kind: Mapped[str] = mapped_column(String(20))
+    idempotency_key: Mapped[str] = mapped_column(String(100), unique=True)
+    project_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("projects.id", ondelete="SET NULL"), index=True
+    )
+    payment_id: Mapped[int | None] = mapped_column(ForeignKey("payments.id", ondelete="SET NULL"))
+    note: Mapped[str | None] = mapped_column(String(200))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class PaymentStatus(StrEnum):
+    PENDING = "pending"
+    PAID = "paid"
+    FAILED = "failed"
+    MISMATCH = "mismatch"  # Chapa reports something other than what we asked: never credited
+
+
+class Payment(TimestampMixin, Base):
+    """A credit-pack purchase through Chapa."""
+
+    __tablename__ = "payments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    tx_ref: Mapped[str] = mapped_column(String(64), unique=True)
+    pack_id: Mapped[str] = mapped_column(String(20))
+    credits: Mapped[int] = mapped_column(Integer)
+    amount_cents: Mapped[int] = mapped_column(Integer)  # ETB x 100
+    currency: Mapped[str] = mapped_column(String(3), default="ETB")
+    status: Mapped[str] = mapped_column(String(12), default=PaymentStatus.PENDING, index=True)
+    checkout_url: Mapped[str | None] = mapped_column(Text)
+    provider_ref: Mapped[str | None] = mapped_column(String(64))
+    failure_reason: Mapped[str | None] = mapped_column(String(300))
+    last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

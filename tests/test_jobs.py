@@ -23,6 +23,7 @@ from adreel.db.models import (
     User,
 )
 from adreel.db.session import session_scope
+from adreel.i18n import t
 from adreel.jobs.tasks import JobRunner
 from adreel.jobs.telegram_client import STANDARD_UPLOAD_LIMIT, TelegramError
 from adreel.render.ffmpeg import FFmpeg
@@ -254,3 +255,25 @@ def test_finished_jobs_are_not_rerun(settings: Settings, talk_clip: Path) -> Non
         db.get(Job, job_id).status = JobStatus.SUCCEEDED  # type: ignore[union-attr]
     JobRunner(settings, telegram=tg, retries_left=lambda: 0).run(str(job_id))  # type: ignore[arg-type]
     assert tg.calls == []
+
+
+def test_failed_final_render_is_refunded_once(settings: Settings, talk_clip: Path) -> None:
+    from adreel.billing import ledger
+    from adreel.db.models import CreditLedger, LedgerKind
+
+    tg = FakeTelegram({"file-1": talk_clip})
+    project_id, job_id = _seed(settings, kind=JobKind.FINAL)  # no plan: the final render fails
+    with session_scope(settings.database_url) as db:
+        user_id = db.get(Project, project_id).user_id  # type: ignore[union-attr]
+        ledger.add_entry_sync(db, user_id=user_id, delta=2, kind=LedgerKind.SIGNUP_BONUS, key="s")
+        ledger.add_entry_sync(
+            db, user_id=user_id, delta=-2, kind=LedgerKind.CHARGE, key=f"charge:{job_id}"
+        )
+    JobRunner(settings, telegram=tg, retries_left=lambda: 0).run(str(job_id))  # type: ignore[arg-type]
+    with session_scope(settings.database_url) as db:
+        assert db.get(Job, job_id).status == JobStatus.FAILED  # type: ignore[union-attr]
+        assert ledger.balance_sync(db, user_id) == 2
+        assert ledger.refund_job_sync(db, job_id) == 0  # a second refund is a no-op
+        kinds = [r.kind for r in db.query(CreditLedger).order_by(CreditLedger.id)]
+        assert kinds == ["signup_bonus", "charge", "refund"]
+    assert t("refunded", "am", credits=2) in tg.calls[-1][1]["text"]

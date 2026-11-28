@@ -238,11 +238,11 @@ TEXTS: dict[str, dict[str, str]] = {
     "help": {
         "am": (
             "AdReel የስልክ ቪዲዮዎችዎን ወደ ማስታወቂያ ይቀይራል።\n\n"
-            "/new — አዲስ ቪዲዮ\n/brand — ብራንድዎን ይቀይሩ\n/lang — ቋንቋ\n/cancel — አቁም\n/help — እገዛ"
+            "/new — አዲስ ቪዲዮ\n/balance — ቀሪ ክሬዲት\n/buy — ክሬዲት ግዛ\n/brand — ብራንድዎን ይቀይሩ\n/lang — ቋንቋ\n/cancel — አቁም\n/help — እገዛ"
         ),
         "en": (
             "AdReel turns your phone clips into ready-to-post ads.\n\n"
-            "/new — make a video\n/brand — edit your brand\n/lang — language\n/cancel — stop\n/help — help"
+            "/new — make a video\n/balance — your credits\n/buy — buy credits\n/brand — edit your brand\n/lang — language\n/cancel — stop\n/help — help"
         ),
     },
     # business types
@@ -260,6 +260,85 @@ TEXTS: dict[str, dict[str, str]] = {
     "f_color": {"am": "ቀለም", "en": "Colour"},
     "f_phone": {"am": "ስልክ", "en": "Phone"},
     "f_handle": {"am": "ቴሌግራም", "en": "Telegram"},
+    # ---------------------------------------------------------------- credits & payments
+    "balance": {
+        "am": "💳 ቀሪ ክሬዲት: {balance}\n\n1 ክሬዲት = እስከ {secs} ሰከንድ ያለ የተጠናቀቀ ቪዲዮ። ፕሪሚየም ድምፅ +{premium}።\nቅድመ-እይታ፣ የጽሑፍ ማስተካከያ እና {redos} ድጋሚ ስራዎች ነፃ ናቸው።{wm}\n\nክሬዲት ለመግዛት /buy",
+        "en": "💳 Credits left: {balance}\n\n1 credit = a finished video up to {secs} s. Premium voice +{premium}.\nPreviews, caption fixes and {redos} re-edits per video are free.{wm}\n\nBuy credits: /buy",
+    },
+    "balance_free_tier": {
+        "am": "\n\nℹ️ ነፃ ክሬዲቶች ያሉት ቪዲዮ የAdReel ምልክት አለው። ክሬዲት ከገዙ በኋላ ምልክቱ ይጠፋል።",
+        "en": "\n\nℹ️ Videos made on free credits carry the AdReel watermark. It goes away once you've bought credits.",
+    },
+    "buy_choose": {
+        "am": "የክሬዲት ጥቅል ይምረጡ (ክፍያ በቻፓ፦ telebirr፣ CBE Birr፣ M-Pesa፣ የባንክ ካርድ):",
+        "en": "Choose a credit pack (paid via Chapa: telebirr, CBE Birr, M-Pesa, bank card):",
+    },
+    "pack_label": {"am": "{credits} ክሬዲት — {price} ብር", "en": "{credits} credits — {price} ETB"},
+    "buy_link": {
+        "am": "🔗 {credits} ክሬዲት በ{price} ብር። ለመክፈል ከታች ያለውን ይጫኑ። ከከፈሉ በኋላ ወደዚህ ይመለሱ — ክሬዲቱ በራሱ ይገባል።",
+        "en": "🔗 {credits} credits for {price} ETB. Tap below to pay. Come back here afterwards — the credits are added automatically.",
+    },
+    "btn_pay": {"am": "💳 ክፈል", "en": "💳 Pay"},
+    "btn_paid_check": {"am": "✅ ከፍያለሁ", "en": "✅ I've paid"},
+    "btn_buy": {"am": "💳 ክሬዲት ግዛ", "en": "💳 Buy credits"},
+    "payments_off": {
+        "am": "ክፍያ ለጊዜው አይሰራም። እባክዎ ቆይተው ይሞክሩ።",
+        "en": "Payments are unavailable right now. Please try again later.",
+    },
+    "payment_init_failed": {
+        "am": "ይቅርታ፣ የክፍያ ገጹን መክፈት አልተቻለም። እባክዎ ትንሽ ቆይተው ይሞክሩ።",
+        "en": "Sorry, we couldn't open the payment page. Please try again in a moment.",
+    },
+    "payment_ok": {
+        "am": "✅ ክፍያው ደርሷል! {credits} ክሬዲት ተጨምሯል። ቀሪ: {balance}።\nቪዲዮዎችዎ ከአሁን ጀምሮ ያለ ምልክት ይወጣሉ። /new",
+        "en": "✅ Payment received! {credits} credits added. Balance: {balance}.\nYour videos come without the watermark from now on. /new",
+    },
+    "payment_already": {
+        "am": "ይህ ክፍያ አስቀድሞ ገብቷል። ቀሪ: {balance}።",
+        "en": "This payment is already in. Balance: {balance}.",
+    },
+    "payment_pending": {
+        "am": "⏳ ክፍያው ገና አልደረሰንም። ከከፈሉ ጥቂት ደቂቃ ይጠብቁ — ሲደርስ እናሳውቅዎታለን።",
+        "en": "⏳ We haven't received the payment yet. If you've paid, give it a few minutes — we'll message you when it lands.",
+    },
+    "payment_failed": {
+        "am": "❌ ክፍያው አልተሳካም ወይም ጊዜው አልፏል። እንደገና ለመሞከር /buy",
+        "en": "❌ That payment failed or expired. Try again: /buy",
+    },
+    "payment_mismatch": {
+        "am": "⚠️ ይህን ክፍያ ማረጋገጥ አልቻልንም። እባክዎ ከክፍያው መለያ ቁጥር ጋር ያግኙን: {tx_ref}",
+        "en": "⚠️ We couldn't confirm this payment. Please contact us with this reference: {tx_ref}",
+    },
+    "payment_unknown": {"am": "ይህን ክፍያ አላገኘነውም።", "en": "We couldn't find that payment."},
+    "need_credits": {
+        "am": "ይህ ቪዲዮ {needed} ክሬዲት ያስፈልገዋል፣ ያለዎት {balance} ነው። ክሬዲት ይግዙ እና እዚሁ «አጽድቅ» ይጫኑ።",
+        "en": "This video needs {needed} credit(s) and you have {balance}. Buy credits, then tap Approve here again.",
+    },
+    "need_credits_start": {
+        "am": "ቪዲዮ ለመስራት ቢያንስ {needed} ክሬዲት ያስፈልጋል (ያለዎት {balance})። ቅድመ-እይታው ነፃ ነው፤ ክፍያው ሲያጸድቁ ብቻ ነው።",
+        "en": "You need at least {needed} credit(s) to make a video (you have {balance}). Previews are free; you only pay when you approve.",
+    },
+    "charged": {
+        "am": "{credits} ክሬዲት ተቀንሷል። ቀሪ: {balance}።",
+        "en": "{credits} credit(s) used. Balance: {balance}.",
+    },
+    "refunded": {
+        "am": "{credits} ክሬዲት ተመልሷል።",
+        "en": "{credits} credit(s) were refunded.",
+    },
+    "grant_usage": {
+        "am": "/grant <telegram_id> <credits> [note]",
+        "en": "/grant <telegram_id> <credits> [note]",
+    },
+    "grant_done": {
+        "am": "✓ {user}: {delta:+d} → {balance}",
+        "en": "✓ {user}: {delta:+d} → {balance}",
+    },
+    "grant_received": {
+        "am": "🎁 {credits} ክሬዲት ተሰጥቶዎታል። ቀሪ: {balance}።",
+        "en": "🎁 You've been given {credits} credits. Balance: {balance}.",
+    },
+    "user_not_found": {"am": "ተጠቃሚው አልተገኘም።", "en": "User not found."},
 }
 
 
