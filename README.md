@@ -8,8 +8,8 @@ Ethiopia and delivered as a Telegram bot.
 |---|---|---|
 | 1 | Render engine + CLI (clips + edit plan + brand kit → video) | done |
 | 2 | AI layer: Scribe transcription, Gemini edit plan, Azure/ElevenLabs TTS, cost log | done |
-| 3 | Telegram bot (aiogram 3), Redis/RQ worker, Postgres, preview/approve/fix-captions | **done** |
-| 4 | Credits ledger, Chapa payments, admin `/stats` | |
+| 3 | Telegram bot (aiogram 3), Redis/RQ worker, Postgres, preview/approve/fix-captions | done |
+| 4 | Credits ledger, Chapa payments, admin `/stats` | **done** |
 
 ## Quick start (local)
 
@@ -162,6 +162,83 @@ Telegram ⇄ bot (aiogram 3, async) ──writes──▶ Postgres (users, brand
   service runs them before the bot and worker start.
 - **Worker platform:** RQ workers need `fork()`, so they run on Linux and macOS (Docker on
   Windows). On Windows without Docker, use `ADREEL_QUEUE_BACKEND=inline`.
+
+## Credits and payments (Phase 4)
+
+### Pricing
+
+| | Credits |
+|---|---|
+| Finished video up to 30 s | 1 |
+| Up to 60 s | 2 (each further 30 s +1) |
+| Premium (ElevenLabs) voice | +1 |
+| Previews, caption fixes, the 2 free re-edits / changes | free |
+
+- **New users** get 2 free credits. Videos made before a user's first purchase carry the
+  watermark.
+- **Packs** live in config (`ADREEL_CREDIT_PACKS`): 5 for 600 ETB, 15 for 1,500 ETB,
+  40 for 3,200 ETB.
+- **When the charge happens:** at Approve, from the preview's real length.
+  - Starting a video, redoing or asking for a change needs enough credits for at least
+    one approval, so AI money isn't spent on a video the user can't buy.
+  - If the final render fails for good, the credits are refunded automatically.
+
+### Ledger
+
+`credit_ledger` is append-only. The balance is always `SUM(delta)`; there is no editable
+balance column. Every row has a unique idempotency key:
+
+- `signup:<user>`
+- `payment:<tx_ref>`
+- `charge:<job>`
+- `refund:<job>`
+- `admin:<uuid>`
+
+So a webhook delivered twice, a retried job or a double tap can never apply a movement
+twice. Charges lock the user row, so two approvals can't overspend.
+
+### Chapa
+
+1. `/buy` → the user picks a pack → we create a `payments` row and a Chapa hosted checkout
+   (telebirr, CBE Birr, M-Pesa, cards). The bot sends a **Pay** link and an
+   **✅ I've paid** button.
+2. Confirmation can arrive several ways, and all of them only *trigger* a check:
+   - the webhook `POST /chapa/webhook` (the signature is checked first)
+   - the callback `GET /chapa/callback`
+   - the return link back into the bot (`/start paid_<tx_ref>`)
+   - the button
+   - a background sweep of pending payments every 2 minutes
+3. The check calls Chapa's **verify** endpoint. It credits only if the status is success
+   **and** the tx_ref, amount, currency and mode (test key ↔ test payment) all match.
+   - Anything else that "succeeded" is marked `mismatch` and never credited.
+   - Pending payments expire after 24 h.
+4. The user gets a "payment received" message exactly once.
+
+Setup:
+
+- In the Chapa dashboard, set the webhook URL to `https://<your host>/chapa/webhook` and
+  the secret hash to `ADREEL_CHAPA_WEBHOOK_SECRET`.
+- Set `ADREEL_PUBLIC_BASE_URL` to the same host. Compose exposes the bot's web server on
+  port 8080; put it behind your HTTPS proxy.
+- Without a public URL, payments still confirm through the return link, the button and
+  the sweep. Use a `CHASECK_TEST-…` key to try it end to end.
+
+### Admin
+
+Admins are the Telegram IDs in `ADREEL_ADMIN_TELEGRAM_IDS`, e.g. `[123456789]`.
+
+- `/stats` shows:
+  - users (new in the last 7 days, paying)
+  - jobs by status, the failure rate and the last 24 h
+  - the queue now
+  - videos delivered
+  - revenue (all-time and 7 d)
+  - pending and mismatched payments
+  - credits sold and used
+  - total API cost and the **average cost per delivered video** (all its previews,
+    re-edits and the final; shown in USD and ETB at `ADREEL_USD_ETB_RATE`)
+- `/grant <telegram_id> <credits> [note]` gives (or, with a negative number, takes back)
+  support credits.
 
 ## The edit plan
 
@@ -449,5 +526,7 @@ Test coverage:
 - A JPEG logo is composited as a rectangle (no background removal).
 - Azure word timings are estimated (see above). Switch the standard tier to the Speech SDK
   if per-word highlight accuracy on standard voices matters.
+- No in-bot refund of purchased credits to money: do it in the Chapa dashboard and
+  `/grant` a negative amount.
 - Prices in the cost log are configurable list prices, not invoices: check them against
   your plans.

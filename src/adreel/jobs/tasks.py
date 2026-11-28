@@ -22,6 +22,7 @@ import httpx
 from adreel.ai.base import ProviderError
 from adreel.autoedit.orchestrator import AutoEditor, AutoEditRequest, RevisionError
 from adreel.autoedit.schema import BusinessContext
+from adreel.billing import ledger
 from adreel.config import Settings, get_settings
 from adreel.db.models import (
     ApiCost,
@@ -313,6 +314,11 @@ class JobRunner:
                 )
                 project.error = str(exc)[:2000]
                 project.status_message_id = None
+            if snap.kind == JobKind.FINAL:  # approved and charged, but nothing delivered
+                refunded = ledger.refund_job_sync(db, snap.job_id)
+                if refunded:
+                    message += "\n" + t("refunded", snap.lang, credits=refunded)
+                    log.info("job.refunded", job=str(snap.job_id), credits=refunded)
         try:
             status.replace(message)
         except TelegramError:

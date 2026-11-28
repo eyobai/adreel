@@ -11,6 +11,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import BotCommand
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from adreel.billing.service import PaymentService, running
 from adreel.bot.handlers import build_router
 from adreel.bot.middlewares import DbSessionMiddleware, ThrottleMiddleware, UserMiddleware
 from adreel.config import Settings
@@ -25,6 +26,8 @@ log = get_logger(__name__)
 COMMANDS = {
     "am": [
         ("new", "አዲስ ቪዲዮ"),
+        ("balance", "ቀሪ ክሬዲት"),
+        ("buy", "ክሬዲት ግዛ"),
         ("brand", "ብራንድ"),
         ("lang", "ቋንቋ"),
         ("help", "እገዛ"),
@@ -32,6 +35,8 @@ COMMANDS = {
     ],
     "en": [
         ("new", "Make a video"),
+        ("balance", "Credits left"),
+        ("buy", "Buy credits"),
         ("brand", "Edit brand"),
         ("lang", "Language"),
         ("help", "Help"),
@@ -61,6 +66,7 @@ def build_dispatcher(
     queue: JobQueue,
     blobs: Storage,
     fsm_storage: BaseStorage | None = None,
+    payment_service: PaymentService | None = None,
 ) -> Dispatcher:
     templates = [tpl.id for tpl in TemplateRegistry(s.templates_dirs).all()]
     dp = Dispatcher(
@@ -69,6 +75,7 @@ def build_dispatcher(
         queue=queue,
         blobs=blobs,
         templates=templates,
+        payment_service=payment_service or PaymentService(s, session_factory, bot=None),
     )
     for observer in (dp.message, dp.callback_query):
         observer.outer_middleware(ThrottleMiddleware(s.rate_limit_messages_per_min))
@@ -88,12 +95,15 @@ async def run_polling(s: Settings) -> None:
         fsm = RedisStorage.from_url(s.redis_url)  # conversations survive bot restarts
     else:
         fsm = MemoryStorage()
+    session_factory = async_session_factory(engine)
+    service = PaymentService(s, session_factory, bot)
     dp = build_dispatcher(
         s,
-        session_factory=async_session_factory(engine),
+        session_factory=session_factory,
         queue=build_queue(s),
         blobs=build_storage(s),
         fsm_storage=fsm,
+        payment_service=service,
     )
     for lang, cmds in COMMANDS.items():
         await bot.set_my_commands(
@@ -104,8 +114,11 @@ async def run_polling(s: Settings) -> None:
     log.info(
         "bot.start", username=me.username, queue=s.queue_backend, local_api=s.telegram_local_mode
     )
+    if not service.enabled:
+        log.warning("payments.disabled", reason="ADREEL_CHAPA_SECRET_KEY is not set")
     try:
-        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+        async with running(service):  # Chapa webhook server + pending-payment sweep
+            await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     finally:
         await bot.session.close()
         await engine.dispose()

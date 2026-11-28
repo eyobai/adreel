@@ -6,7 +6,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, SecretStr
+from pydantic import BaseModel, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from adreel.ai.costs import Prices
@@ -14,6 +14,12 @@ from adreel.ai.costs import Prices
 PACKAGE_DIR = Path(__file__).resolve().parent
 ASSETS_DIR = PACKAGE_DIR / "assets"
 BUILTIN_TEMPLATES_DIR = PACKAGE_DIR / "templates"
+
+
+class CreditPack(BaseModel):
+    id: str = Field(pattern=r"^[a-z0-9]{1,20}$")
+    credits: int = Field(gt=0)
+    price_etb: int = Field(gt=0)
 
 
 class Settings(BaseSettings):
@@ -111,6 +117,28 @@ class Settings(BaseSettings):
     rate_limit_videos_per_hour: int = Field(6, ge=1)
     status_update_interval_s: float = Field(3.0, ge=0.5)
     admin_telegram_ids: list[int] = Field(default_factory=list)
+
+    # --- credits & payments (Phase 4) -------------------------------------------
+    signup_bonus_credits: int = Field(2, ge=0)
+    credit_seconds: int = Field(30, ge=5, description="1 credit = a finished video up to this long")
+    premium_voice_credits: int = Field(1, ge=0)
+    credit_packs: list[CreditPack] = Field(
+        default_factory=lambda: [
+            CreditPack(id="p5", credits=5, price_etb=600),
+            CreditPack(id="p15", credits=15, price_etb=1500),
+            CreditPack(id="p40", credits=40, price_etb=3200),
+        ]
+    )
+    chapa_secret_key: SecretStr | None = None  # CHASECK-... / CHASECK_TEST-...
+    chapa_webhook_secret: SecretStr | None = None  # set the same value in the Chapa dashboard
+    chapa_base_url: str = "https://api.chapa.co"
+    # Public HTTPS address of this bot's web server (webhook + callback). Optional: without
+    # it, payments are still confirmed by the return link, "I've paid" and the sweep.
+    public_base_url: str | None = None
+    http_host: str = "0.0.0.0"
+    http_port: int = Field(8080, ge=1, le=65535)
+    payment_sweep_interval_s: int = Field(120, ge=10)
+    usd_etb_rate: float = Field(155.0, gt=0, description="Only for /stats cost display")
 
     # --- logging -------------------------------------------------------------
     log_level: str = "INFO"

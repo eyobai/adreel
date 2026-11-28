@@ -10,6 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from adreel.billing import ledger
 from adreel.db.models import (
     BrandKitRow,
     Clip,
@@ -33,6 +34,7 @@ async def get_or_create_user(
     first_name: str | None,
     username: str | None,
     language_code: str | None,
+    signup_bonus: int = 0,
 ) -> tuple[User, bool]:
     user = await db.scalar(
         select(User).where(User.telegram_id == telegram_id).options(selectinload(User.brand_kit))
@@ -47,6 +49,7 @@ async def get_or_create_user(
     )
     db.add(user)
     await db.flush()
+    await ledger.grant_signup_bonus(db, user.id, signup_bonus)
     await db.refresh(user, ["brand_kit"])
     return user, True
 
@@ -93,7 +96,11 @@ async def create_project(db: AsyncSession, user: User, template_id: str, chat_id
     for d in drafts:
         d.status = ProjectStatus.CANCELLED
     project = Project(
-        user_id=user.id, template_id=template_id, language=user.language, chat_id=chat_id
+        user_id=user.id,
+        template_id=template_id,
+        language=user.language,
+        chat_id=chat_id,
+        watermark=not await ledger.has_paid(db, user.id),  # free-tier videos are watermarked
     )
     db.add(project)
     await db.flush()

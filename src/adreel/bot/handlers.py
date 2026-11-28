@@ -24,7 +24,9 @@ from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from adreel.autoedit.brief import AUTO_TEMPLATE, extract_price
+from adreel.billing import ledger
 from adreel.bot import keyboards as kb
+from adreel.bot.billing_handlers import build_billing_router, buy_button
 from adreel.bot.parsing import (
     clean_text,
     parse_caption_fixes,
@@ -572,6 +574,9 @@ async def on_voice(
     if await videos_last_hour(db, user.id) >= settings.rate_limit_videos_per_hour:
         await target.answer(t("rate_limited_videos", lang))
         return
+    # Previews are free, but don't spend AI money on a video the user can't approve.
+    if not await _has_credits(db, target, user, _min_credits(settings, project), lang, start=True):
+        return
     await state.clear()
     await _start_job(db, target, project, JobKind.AUTO_EDIT, t("queued", lang), queue)
 
@@ -584,13 +589,55 @@ async def _start_job(
     text: str,
     queue: JobQueue,
     params: dict[str, Any] | None = None,
-) -> None:
+    charge: int = 0,
+) -> bool:
     status = await target.answer(text)
     project.chat_id = status.chat.id
     job = await create_job(db, project, kind, status.message_id, params)
+    if charge:
+        try:
+            left = await ledger.charge(
+                db,
+                user_id=project.user_id,
+                amount=charge,
+                key=f"charge:{job.id}",
+                project_id=project.id,
+                note=f"{kind.value} {project.duration_s or 0:.0f}s voice={project.voice}",
+            )
+        except ledger.InsufficientCredits as exc:  # spent elsewhere since the check
+            await db.rollback()
+            await status.edit_text(
+                t("need_credits", project.language, needed=exc.needed, balance=exc.balance),
+                reply_markup=buy_button(project.language),
+            )
+            return False
+        text = f"{text}\n{t('charged', project.language, credits=charge, balance=left)}"
+        with contextlib.suppress(TelegramBadRequest):
+            await status.edit_text(text)
     await db.commit()  # the worker must see the job before it runs
     job.rq_job_id = await asyncio.to_thread(queue.enqueue, str(job.id))
     log.info("job.enqueued", job=str(job.id), kind=kind.value, project=str(project.id))
+    return True
+
+
+def _min_credits(settings: Settings, project: Project) -> int:
+    return ledger.credits_for(
+        project.duration_s,
+        project.voice,
+        credit_seconds=settings.credit_seconds,
+        premium_extra=settings.premium_voice_credits,
+    )
+
+
+async def _has_credits(
+    db: AsyncSession, target: Message, user: User, needed: int, lang: str, *, start: bool = False
+) -> bool:
+    bal = await ledger.balance(db, user.id)
+    if bal >= needed:
+        return True
+    key = "need_credits_start" if start else "need_credits"
+    await target.answer(t(key, lang, needed=needed, balance=bal), reply_markup=buy_button(lang))
+    return False
 
 
 # =========================================================================== preview review
@@ -640,6 +687,8 @@ async def on_preview_action(
             await cb.answer(t("redo_limit", lang), show_alert=True)
             return
         await cb.answer()
+        if not await _has_credits(db, target, user, _min_credits(settings, project), lang):
+            return
         await state.set_state(ChangeRequest.waiting)
         await state.update_data(project_id=str(project.id))
         await target.answer(t("ask_change", lang))
@@ -649,6 +698,8 @@ async def on_preview_action(
             await cb.answer(t("redo_limit", lang), show_alert=True)
             return
         await cb.answer()
+        if not await _has_credits(db, target, user, _min_credits(settings, project), lang):
+            return
         await _drop_keyboard(cb)
         project.redo_count += 1
         left = settings.max_redos - project.redo_count
@@ -656,9 +707,15 @@ async def on_preview_action(
             db, target, project, JobKind.AUTO_EDIT, t("redo_started", lang, left=left), queue
         )
         return
-    await cb.answer()  # approve
+    await cb.answer()  # approve: this is where the video is paid for
+    needed = _min_credits(settings, project)
+    if not await _has_credits(db, target, user, needed, lang):
+        return  # the preview buttons stay, so Approve works again after /buy
     await _drop_keyboard(cb)
-    await _start_job(db, target, project, JobKind.FINAL, t("final_rendering", lang), queue)
+    project.watermark = not await ledger.has_paid(db, user.id)  # bought since the preview?
+    await _start_job(
+        db, target, project, JobKind.FINAL, t("final_rendering", lang), queue, charge=needed
+    )
 
 
 @router.message(ChangeRequest.waiting, F.text)
@@ -774,7 +831,10 @@ def build_router() -> Router:
     fresh = Router(name="adreel")
     for name, observer in router.observers.items():
         fresh.observers[name].handlers.extend(observer.handlers)
-    return fresh
+    parent = Router(name="adreel-root")
+    parent.include_router(build_billing_router())  # before the catch-all fallbacks
+    parent.include_router(fresh)
+    return parent
 
 
 def _reply(cb: CallbackQuery) -> Message:
