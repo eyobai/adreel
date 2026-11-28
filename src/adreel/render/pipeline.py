@@ -29,6 +29,7 @@ from adreel.config import Settings, get_settings
 from adreel.log import get_logger
 from adreel.plan_checks import PlanError, check_plan, repair_plan
 from adreel.render.captions import CaptionEvent
+from adreel.render.color import Grade, correction, measure
 from adreel.render.ffmpeg import BT709_FILTER, BT709_TAGS, FFmpeg
 from adreel.render.normalize import NormalizedClip, NormalizeParams, normalize_clip
 from adreel.render.overlays import LogoPlacement, build_overlays
@@ -185,10 +186,21 @@ class Renderer:
         tl = build_timeline(plan, fps, end_card_s)
         zooms = self._alternate_zooms(plan, tpl)
         seg_files: list[Path] = []
+        grades = {
+            cid: correction(measure(self.ff, n.path) if plan.look != "none" else None, plan.look)
+            for cid, n in norm.items()
+        }
         for i, p in enumerate(tl.placed):
             seg_files.append(
                 self._render_segment(
-                    p, norm[p.segment.clip_id], zooms[i], out_w, out_h, fps, preset
+                    p,
+                    norm[p.segment.clip_id],
+                    zooms[i],
+                    out_w,
+                    out_h,
+                    fps,
+                    preset,
+                    grades[p.segment.clip_id],
                 )
             )
             report("segments", 0.3 + 0.35 * (i + 1) / len(tl.placed))
@@ -337,11 +349,14 @@ class Renderer:
         out_h: int,
         fps: int,
         preset: QualityPreset,
+        grade: Grade | None = None,
     ) -> Path:
         seg = p.segment
+        grade_filter = grade.filter() if grade else ""
         tracking = self.s.face_tracking and seg.reframe.mode in (ReframeMode.AUTO, ReframeMode.FACE)
         key = _key(
-            "seg-v2",
+            "seg-v3",
+            grade_filter,
             clip.path.name,
             seg.start,
             p.frames,
@@ -373,7 +388,8 @@ class Renderer:
         vol = "" if seg.keep_audio else ",volume=0"
         fc = (
             decision.video_filter(out_w, out_h, "0:v", "vr")
-            + f";[vr]tpad=stop_mode=clone:stop_duration=2,{BT709_FILTER}[v];"
+            + f";[vr]{grade_filter + ',' if grade_filter else ''}"
+            + f"tpad=stop_mode=clone:stop_duration=2,{BT709_FILTER}[v];"
             + f"[0:a]asetpts=PTS-STARTPTS{vol},apad,atrim=0:{dur:.6f}[a]"
         )
         tmp = dst.with_suffix(".part.mkv")

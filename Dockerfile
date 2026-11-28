@@ -1,4 +1,4 @@
-# AdReel image: render engine + AI layer CLI. Phase 3 adds bot/worker services via compose.
+# AdReel image: one image for the CLI, the Telegram bot and render workers (see docker-compose.yml).
 FROM python:3.12-slim-bookworm
 
 # ffmpeg: Debian's build includes libass (+HarfBuzz/FriBidi), libzimg (zscale, HDR tone
@@ -12,14 +12,15 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     ADREEL_WORK_DIR=/data/work \
+    ADREEL_STORAGE_DIR=/data/storage \
     ADREEL_LOG_JSON=1
 
 WORKDIR /app
 COPY pyproject.toml README.md ./
 COPY src ./src
-RUN pip install ".[face]"
+RUN pip install ".[face,s3]"
 
-RUN useradd --create-home --uid 1000 adreel && mkdir -p /data/work && chown -R adreel /data
+RUN useradd --create-home --uid 1000 adreel && mkdir -p /data/work /data/storage && chown -R adreel /data
 USER adreel
 VOLUME ["/data"]
 

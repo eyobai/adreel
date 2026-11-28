@@ -14,11 +14,12 @@ The math is pure and unit-tested. MediaPipe is an optional extra (``adreel[face]
 
 from __future__ import annotations
 
+import contextlib
 import itertools
 import os
 import statistics
 import subprocess
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Protocol
@@ -173,6 +174,31 @@ def _percentile(values: Sequence[float], q: float) -> float:
 # --------------------------------------------------------------------------- face tracking
 
 
+@contextlib.contextmanager
+def quiet_native_stderr() -> Iterator[None]:
+    """Silence C++ logging (MediaPipe / LiteRT INFO and W0000 lines) written straight to fd 2.
+
+    POSIX only: on Windows, redirecting the console's fd is not worth the risk for
+    cosmetic output.
+    """
+    if os.name == "nt":
+        yield
+        return
+    try:
+        saved = os.dup(2)
+        devnull = os.open(os.devnull, os.O_WRONLY)
+    except OSError:
+        yield
+        return
+    try:
+        os.dup2(devnull, 2)
+        yield
+    finally:
+        os.dup2(saved, 2)
+        os.close(saved)
+        os.close(devnull)
+
+
 class FaceTracker(Protocol):
     def sample(
         self, path: Path, start: float, end: float, src_w: int, src_h: int
@@ -233,7 +259,8 @@ class MediaPipeFaceTracker:
             min_detection_confidence=min_confidence,
         )
         try:
-            self._detector = vision.FaceDetector.create_from_options(opts)
+            with quiet_native_stderr():
+                self._detector = vision.FaceDetector.create_from_options(opts)
         except (OSError, RuntimeError) as exc:  # e.g. missing libEGL/libGLES system libs
             raise FaceTrackingUnavailable(f"mediapipe failed to start: {exc}") from exc
         self.ffmpeg_bin = ffmpeg_bin
@@ -242,8 +269,6 @@ class MediaPipeFaceTracker:
         self.tile_frac = tile_frac
 
     def sample(self, path: Path, start: float, end: float, src_w: int, src_h: int) -> list[Sample]:
-        import mediapipe as mp
-        import numpy as np
 
         k = min(1.0, self.short_side / min(src_w, src_h))
         w, h = max(2, round(src_w * k / 2) * 2), max(2, round(src_h * k / 2) * 2)
@@ -271,6 +296,23 @@ class MediaPipeFaceTracker:
         side = int(min(w, h) * self.tile_frac)
         tiles = square_tiles(w, h, side)
         out: list[Sample] = []
+        with quiet_native_stderr():
+            self._detect_frames(raw, w, h, frame_bytes, side, tiles, out)
+        return out
+
+    def _detect_frames(
+        self,
+        raw: bytes,
+        w: int,
+        h: int,
+        frame_bytes: int,
+        side: int,
+        tiles: list[tuple[int, int]],
+        out: list[Sample],
+    ) -> None:
+        import mediapipe as mp
+        import numpy as np
+
         for i in range(len(raw) // frame_bytes):
             frame = np.frombuffer(raw, np.uint8, frame_bytes, i * frame_bytes).reshape(h, w, 3)
             best: tuple[float, float, float] | None = None  # (score, cx_px, cy_px)
@@ -291,10 +333,10 @@ class MediaPipeFaceTracker:
                         )
             t = i / self.sample_fps
             out.append((t, best[1] / w, best[2] / h) if best else (t, None, None))
-        return out
 
     def close(self) -> None:
-        self._detector.close()
+        with quiet_native_stderr():
+            self._detector.close()
 
 
 # --------------------------------------------------------------------------- decision

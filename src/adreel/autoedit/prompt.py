@@ -10,6 +10,7 @@ from adreel.ai.base import Transcript
 from adreel.autoedit.schema import BusinessContext
 from adreel.autoedit.transcript_lines import TranscriptLine
 from adreel.schemas.brand_kit import BrandKit
+from adreel.schemas.edit_plan import EditPlan
 from adreel.schemas.template import TemplateSpec
 
 # Measured Amharic TTS pace is ~2.2–2.6 words/s; budget conservatively so VO fits.
@@ -60,6 +61,16 @@ afterwards, so choose whole thoughts.
 translate or rewrite style. Omit lines that are fine.
 - reframe_mode: "auto" unless you have a reason; use focus_x to point at the subject when \
 it is off-centre in a landscape shot.
+
+You write ALL the on-screen text yourself; the business only told you what they want:
+- slots.hook_text: a scroll-stopping opening line (max 5 words) that fits the brief.
+- slots.product_name: the product as the business calls it (from the brief or speech).
+- slots.cta_text: a short call to action (e.g. order, visit, call).
+- on_screen_text: 1-3 short labels or emphasis lines on the key moments (benefits, offer, \
+what makes it special), anchored to the segment where that thing is visible or said.
+- look: the colour style that suits the business and brief (vivid for food and products, \
+warm for cafés and cosy places, cool for tech or fitness, natural otherwise). Exposure and \
+white balance are corrected automatically; look only sets the mood.
 """
 
 
@@ -87,6 +98,10 @@ def build_prompt(
     end_card = template.end_card.duration_s if template.end_card.enabled else 0.0
     lo, hi = template.duration.min_s - end_card, template.duration.max_s - end_card
     out: list[str] = []
+    if context.brief:
+        out.append("## What the business wants (their own words: follow it closely)")
+        out.append(context.brief)
+        out.append("")
     out.append("## Business")
     out.append(f"- Name: {brand.business_name} ({brand.business_type.value})")
     for label, value in [
@@ -155,3 +170,69 @@ def build_prompt(
 def format_problems(problems: Sequence[str]) -> str:
     body = "\n".join(f"- {p}" for p in problems[:20])
     return f"Your JSON had these problems:\n{body}\nReturn the complete corrected JSON object."
+
+
+def build_revision_prompt(
+    *,
+    template: TemplateSpec,
+    brand: BrandKit,
+    context: BusinessContext,
+    clips: Sequence[ClipAnalysis],
+    lines: Sequence[TranscriptLine],
+    current: EditPlan,
+    instruction: str,
+    has_voiceover: bool,
+    language: str,
+) -> str:
+    """The normal planning prompt + the current edit + what the business wants changed."""
+    base = build_prompt(
+        template=template,
+        brand=brand,
+        context=context,
+        clips=clips,
+        lines=lines,
+        want_voiceover=has_voiceover,
+        language=language,
+    )
+    base = base.removesuffix("\nReturn only the JSON object.")
+    out = [base, "", "## Current edit (what the business has now)"]
+    for s in current.segments:
+        extra = (
+            f" (reframe {s.reframe.mode.value}, focus_x {s.reframe.focus_x})"
+            if s.reframe.mode.value != "auto"
+            else ""
+        )
+        note = f" — {s.note}" if s.note else ""
+        out.append(f"- {s.id}: {s.clip_id} {s.start:.2f}-{s.end:.2f} {s.role.value}{extra}{note}")
+    sl = current.slots
+    for label, value in [
+        ("hook_text", sl.hook_text),
+        ("product_name", sl.product_name),
+        ("cta_text", sl.cta_text),
+        ("price_note", sl.price_note),
+    ]:
+        if value:
+            out.append(f"- slots.{label}: {value}")
+    for t in current.on_screen_text:
+        out.append(
+            f'- on_screen_text "{t.text}" on {t.segment_id} at +{t.start_offset:.1f}s '
+            f"({t.style.value}, {t.position.value})"
+        )
+    if current.price_card.enabled:
+        out.append(f"- price_card_segment_id: {current.price_card.segment_id or 'default'}")
+    out.append(f"- look: {current.look}")
+    if current.voiceover:
+        out.append(f"- voiceover_script: {current.voiceover.script}")
+    name = language_rules(language)[0]
+    out += [
+        "",
+        "## Requested change (the business's own words)",
+        instruction,
+        "",
+        "Return the COMPLETE revised edit as JSON in the same schema. Change only what the "
+        "request needs; keep every other segment, text and the look exactly as they are. "
+        f"If part of the request can't be done with this footage, do what you can and say so "
+        f"briefly in `message` (in {name}); otherwise set `message` to null. Prices are "
+        "handled for you: never change them yourself.",
+    ]
+    return "\n".join(out)

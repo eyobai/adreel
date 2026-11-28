@@ -29,11 +29,13 @@ def test_detects_reality_problems(promo_plan: EditPlan, promo_tpl: TemplateSpec)
 
 
 def test_missing_slot_is_error(promo_plan: EditPlan, promo_tpl: TemplateSpec) -> None:
-    plan = promo_plan.model_copy(
-        update={"slots": promo_plan.slots.model_copy(update={"product_name": None})}
+    # The price is the one fact a promo can't do without (the name can come from the brief).
+    slots = promo_plan.slots.model_copy(
+        update={"price": None, "old_price": None, "product_name": None}
     )
+    plan = promo_plan.model_copy(update={"slots": slots})
     errs = [i for i in check_plan(plan, promo_tpl, DUR) if i.severity == "error"]
-    assert codes(errs) == {"missing_slot"}
+    assert codes(errs) == {"missing_slot"} and "price" in errs[0].message
 
 
 def test_template_mismatch(promo_plan: EditPlan, talk_tpl: TemplateSpec) -> None:

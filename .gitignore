@@ -17,3 +17,7 @@ examples/media/
 *.mp4
 *.part.*
 examples/out/
+# local runs of the bot
+storage/
+*.db
+*.sqlite

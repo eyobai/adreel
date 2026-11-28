@@ -175,9 +175,17 @@ def render(
 
 @app.command()
 def make(
-    template: Annotated[str, typer.Option("--template", "-t", help="product_promo | talking_head")],
     brand: Annotated[Path, typer.Option("--brand", "-b", help="Brand kit JSON", exists=True)],
     clip: ClipOpt,
+    brief: Annotated[
+        str | None,
+        typer.Option(
+            "--brief", "-p", help="Tell it what you want, in your own words (Amharic or English)"
+        ),
+    ] = None,
+    template: Annotated[
+        str, typer.Option("--template", "-t", help="auto | product_promo | talking_head")
+    ] = "auto",
     out: Annotated[Path, typer.Option("--out", "-o", help="Output .mp4")] = Path("out.mp4"),
     product: Annotated[str | None, typer.Option(help="Product name")] = None,
     price: Annotated[float | None, typer.Option(help="Price in ETB")] = None,
@@ -228,6 +236,7 @@ def make(
             target_customer=target,
             cta=cta,
             notes=notes,
+            brief=brief,
         )
     except ValidationError as exc:
         raise typer.BadParameter(str(exc)) from exc
@@ -274,6 +283,69 @@ def make(
         f"  cost: ${c.total_usd:.4f} (≈ {c.total_usd * c.prices.usd_to_etb:.2f} ETB)  "
         f"units: {c.totals()}  → {res.cost_path}"
     )
+
+
+@app.command()
+def revise(
+    plan: PlanOpt,
+    brand: Annotated[Path, typer.Option("--brand", "-b", help="Brand kit JSON", exists=True)],
+    clip: ClipOpt,
+    prompt: Annotated[str, typer.Option("--prompt", help="What to change, in your own words")],
+    out: Annotated[Path, typer.Option("--out", "-o", help="Output .mp4")] = Path("revised.mp4"),
+    brief: Annotated[
+        str | None, typer.Option(help="The original brief (gives the AI context)")
+    ] = None,
+    voice: Annotated[
+        str | None, typer.Option(help="none | standard | premium (default: as in the plan)")
+    ] = None,
+    quality: Annotated[Quality, typer.Option("--quality", "-q")] = Quality.PREVIEW,
+    watermark: Annotated[bool, typer.Option("--watermark/--no-watermark")] = False,
+    work_dir: Annotated[Path | None, typer.Option(help="Cache/work directory")] = None,
+) -> None:
+    """Change an existing edit with a prompt (needs the Gemini planner). Writes OUT,
+    OUT.plan.json and OUT.cost.json."""
+    from adreel.ai.base import ProviderError
+    from adreel.autoedit.orchestrator import AutoEditError, AutoEditor, AutoEditRequest
+    from adreel.autoedit.schema import BusinessContext
+    from adreel.schemas.edit_plan import VoiceTier
+
+    current = _load_plan(plan)
+    s = get_settings().model_copy(update={"work_dir": work_dir} if work_dir else {})
+    if voice is None:
+        tier = current.voiceover.voice if current.voiceover else None
+    elif voice in ("standard", "premium"):
+        tier = VoiceTier(voice)
+    elif voice == "none":
+        tier = None
+    else:
+        raise typer.BadParameter("--voice must be none, standard or premium")
+    req = AutoEditRequest(
+        template_id=current.template_id,
+        brand=_load_brand(brand),
+        clips=_parse_clips(clip),
+        context=BusinessContext(brief=brief, price=current.slots.price),
+        output=out,
+        voice=tier,
+        quality=quality,
+        watermark=watermark,
+        language=current.language,
+    )
+    try:
+        with AutoEditor(settings=s, renderer=Renderer(settings=s)) as editor:
+            res = editor.revise(
+                req, current, prompt, lambda st, fr: _status(f"{st:<18} {int(fr * 100):3d}%")
+            )
+    except (AutoEditError, ProviderError, RenderError, FFmpegError, TemplateError) as exc:
+        _say(f"\nFailed: {exc}", color="red", err=True)
+        raise typer.Exit(1) from exc
+    _say("", err=True)
+    for w in res.warnings:
+        _say(f"warning: {w}", color="yellow", err=True)
+    r = res.render
+    _say(f"✓ {r.output}  {r.width}x{r.height}  {r.duration:.2f}s", color="green")
+    if res.message:
+        _say(f"  note from the AI: {res.message}")
+    _say(f"  plan: {res.plan_path}   cost: ${res.costs.total_usd:.4f} → {res.cost_path}")
 
 
 @app.command()
@@ -380,6 +452,65 @@ def samples(
     s = get_settings()
     for p in generate_samples(FFmpeg(s.ffmpeg_bin, s.ffprobe_bin), out, s.fonts_dir):
         _say(f"  {p}")
+
+
+# --------------------------------------------------------------------------- Phase 3
+
+db_app = typer.Typer(help="Database migrations")
+app.add_typer(db_app, name="db")
+
+
+@db_app.command("upgrade")
+def db_upgrade(revision: Annotated[str, typer.Argument()] = "head") -> None:
+    """Apply migrations (ADREEL_DATABASE_URL)."""
+    from adreel.db.migrate import upgrade
+
+    upgrade(get_settings().database_url, revision)
+    _say(f"✓ database at {revision}", color="green")
+
+
+@db_app.command("downgrade")
+def db_downgrade(revision: Annotated[str, typer.Argument()]) -> None:
+    """Roll migrations back to REVISION (e.g. base)."""
+    from adreel.db.migrate import downgrade
+
+    downgrade(get_settings().database_url, revision)
+    _say(f"✓ database at {revision}", color="green")
+
+
+@app.command()
+def bot() -> None:
+    """Run the Telegram bot (long polling)."""
+    import asyncio
+
+    from adreel.bot.app import run_polling
+
+    s = get_settings()
+    if s.queue_backend == "inline":
+        _say("queue: inline (jobs run inside this process; no Redis needed)", err=True)
+    asyncio.run(run_polling(s))
+
+
+@app.command()
+def worker(
+    burst: Annotated[bool, typer.Option(help="Exit when the queue is empty")] = False,
+) -> None:
+    """Run a render worker (Redis + RQ). Start as many as your CPUs allow."""
+    if os.name == "nt":
+        _say(
+            "RQ workers need fork() and can't run on Windows. Use Docker (docker compose up), WSL, "
+            "or ADREEL_QUEUE_BACKEND=inline to run jobs inside the bot process.",
+            err=True,
+            color="red",
+        )
+        raise typer.Exit(1)
+    from redis import Redis
+    from rq import Queue, Worker
+
+    s = get_settings()
+    conn = Redis.from_url(s.redis_url)
+    w = Worker([Queue(s.queue_name, connection=conn)], connection=conn)
+    w.work(with_scheduler=True, burst=burst)  # scheduler: delayed retries
 
 
 if __name__ == "__main__":  # pragma: no cover

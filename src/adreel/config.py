@@ -73,6 +73,45 @@ class Settings(BaseSettings):
     language: Literal["am", "en"] = "am"
     prices: Prices = Field(default_factory=Prices)
 
+    # --- Telegram bot, queue, database, storage (Phase 3) ----------------------
+    telegram_bot_token: SecretStr | None = None
+    # Self-hosted Bot API server (local mode lifts the 20 MB download / 50 MB upload caps).
+    telegram_api_base: str = "https://api.telegram.org"
+    telegram_local_mode: bool = False
+    # Where the local Bot API server's files are visible to the worker (shared volume).
+    # Local-mode getFile returns absolute paths under the server's --dir; map them here.
+    telegram_local_files_dir: Path | None = None
+    telegram_server_files_dir: str = "/var/lib/telegram-bot-api"
+
+    database_url: str = "sqlite:///adreel.db"
+    redis_url: str = "redis://localhost:6379/0"
+    # "rq": Redis + separate worker process (production). "inline": jobs run on a background
+    # thread inside the bot process: no Redis needed (local testing, Windows).
+    queue_backend: Literal["rq", "inline"] = "rq"
+    queue_name: str = "adreel"
+    job_timeout_s: int = Field(1200, ge=60, description="Hard limit per worker job")
+    job_retries: int = Field(2, ge=0, le=5, description="Retries for transient failures")
+
+    storage_backend: Literal["local", "s3"] = "local"
+    storage_dir: Path = Path("storage")
+    s3_bucket: str | None = None
+    s3_prefix: str = ""
+    s3_endpoint_url: str | None = None  # e.g. Cloudflare R2, MinIO
+    s3_region: str | None = None
+    s3_access_key_id: str | None = None
+    s3_secret_access_key: SecretStr | None = None
+
+    # Product limits
+    max_clips: int = Field(5, ge=1, le=10)
+    max_clip_seconds: int = Field(180, ge=5)
+    max_total_seconds: int = Field(300, ge=10)
+    max_redos: int = Field(2, ge=0, description="Free re-renders (AI re-plan) per video")
+    max_caption_fixes: int = Field(10, ge=0, description="Caption-fix re-renders per video")
+    rate_limit_messages_per_min: int = Field(30, ge=1)
+    rate_limit_videos_per_hour: int = Field(6, ge=1)
+    status_update_interval_s: float = Field(3.0, ge=0.5)
+    admin_telegram_ids: list[int] = Field(default_factory=list)
+
     # --- logging -------------------------------------------------------------
     log_level: str = "INFO"
     log_json: bool = False

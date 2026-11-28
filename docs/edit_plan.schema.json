@@ -570,6 +570,19 @@
         }
       ],
       "default": null
+    },
+    "look": {
+      "default": "natural",
+      "description": "Colour look applied on top of automatic correction",
+      "enum": [
+        "natural",
+        "vivid",
+        "warm",
+        "cool",
+        "none"
+      ],
+      "title": "Look",
+      "type": "string"
     }
   },
   "required": [

@@ -8,7 +8,7 @@ word boundaries (``autoedit.cuts``). ``autoedit.assemble`` turns this into an ``
 
 from __future__ import annotations
 
-from typing import Self
+from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -56,10 +56,19 @@ class PlannerOutput(_Strict):
     slots: TemplateSlots = TemplateSlots()
     price_card_segment_id: Ident | None = None
     voiceover_script: str | None = Field(None, max_length=1500)
+    message: str | None = Field(
+        None,
+        max_length=300,
+        description="Revisions only: a short note to the business when part of their request "
+        "could not be done (in their language); otherwise null",
+    )
+    look: Literal["natural", "vivid", "warm", "cool"] = Field(
+        "natural", description="Colour look: vivid for food/products, warm for cafés, cool for tech"
+    )
 
 
 class BusinessContext(BaseModel):
-    """Answers from the bot's quick questions (Phase 3) or CLI flags."""
+    """What the business told us: a free-text brief and/or specific answers."""
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
@@ -70,3 +79,6 @@ class BusinessContext(BaseModel):
     target_customer: str | None = Field(None, max_length=200)
     cta: str | None = Field(None, max_length=60)
     notes: str | None = Field(None, max_length=500)
+    brief: str | None = Field(
+        None, max_length=1000, description="The business's own words: what they want"
+    )
